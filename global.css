@@ -1,0 +1,91 @@
+@import "tailwindcss";
+@import "uniwind";
+
+@import "tw-animate-css";
+
+@theme {
+  --radius: 10px;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --spacing-hairline: hairlineWidth();
+}
+
+/* Base palette mirrors gradexis-web/src/theme.css (:root / .dark) so the two
+   apps start from the same default look before any color-theme picker
+   selection is applied. */
+@layer theme {
+  :root {
+    @variant light {
+    --color-background:  oklch(1 0 0);
+    --color-foreground:  oklch(0.1450 0 0);
+    --color-card:  oklch(1 0 0);
+    --color-card-foreground:  oklch(0.1450 0 0);
+    --color-popover:  oklch(1 0 0);
+    --color-popover-foreground:  oklch(0.1450 0 0);
+    --color-primary:  oklch(0.3320 0.1323 259.5606);
+    --color-primary-foreground:  oklch(0.9850 0 0);
+    --color-secondary:  oklch(0.9700 0 0);
+    --color-secondary-foreground:  oklch(0.2050 0 0);
+    --color-muted:  oklch(0.9700 0 0);
+    --color-muted-foreground:  oklch(0.5560 0 0);
+    --color-accent:  oklch(0.9700 0 0);
+    --color-accent-foreground:  oklch(0.2050 0 0);
+    --color-destructive:  oklch(0.5770 0.2450 27.3250);
+    --color-destructive-foreground:  oklch(1 0 0);
+    --color-border:  oklch(0.9220 0 0);
+    --color-input:  oklch(0.9220 0 0);
+    --color-ring:  oklch(0.7080 0 0);
+    --color-chart-1:  oklch(0.8100 0.1000 252);
+    --color-chart-2:  oklch(0.6200 0.1900 260);
+    --color-chart-3:  oklch(0.5500 0.2200 263);
+    --color-chart-4:  oklch(0.4900 0.2200 264);
+    --color-chart-5:  oklch(0.4200 0.1800 266);
+    --color-sidebar:  oklch(0.9850 0 0);
+    --color-sidebar-foreground:  oklch(0.1450 0 0);
+    --color-sidebar-primary:  oklch(0.2050 0 0);
+    --color-sidebar-primary-foreground:  oklch(0.9850 0 0);
+    --color-sidebar-accent:  oklch(0.9700 0 0);
+    --color-sidebar-accent-foreground:  oklch(0.2050 0 0);
+    --color-sidebar-border:  oklch(0.9220 0 0);
+    --color-sidebar-ring:  oklch(0.7080 0 0);
+    }
+
+    @variant dark {
+      --color-background:  oklch(0.1450 0 0);
+      --color-foreground:  oklch(0.9850 0 0);
+      --color-card:  oklch(0.2050 0 0);
+      --color-card-foreground:  oklch(0.9850 0 0);
+      --color-popover:  oklch(0.2690 0 0);
+      --color-popover-foreground:  oklch(0.9850 0 0);
+      --color-primary:  oklch(0.8289 0.0921 244.2820);
+      --color-primary-foreground:  oklch(0.2050 0 0);
+      --color-secondary:  oklch(0.2690 0 0);
+      --color-secondary-foreground:  oklch(0.9850 0 0);
+      --color-muted:  oklch(0.2690 0 0);
+      --color-muted-foreground:  oklch(0.7080 0 0);
+      --color-accent:  oklch(0.3710 0 0);
+      --color-accent-foreground:  oklch(0.9850 0 0);
+      --color-destructive:  oklch(0.7040 0.1910 22.2160);
+      --color-destructive-foreground:  oklch(0.9850 0 0);
+      --color-border:  oklch(0.2750 0 0);
+      --color-input:  oklch(0.3250 0 0);
+      --color-ring:  oklch(0.5560 0 0);
+      --color-chart-1:  oklch(0.8100 0.1000 252);
+      --color-chart-2:  oklch(0.6200 0.1900 260);
+      --color-chart-3:  oklch(0.5500 0.2200 263);
+      --color-chart-4:  oklch(0.4900 0.2200 264);
+      --color-chart-5:  oklch(0.4200 0.1800 266);
+      --color-sidebar:  oklch(0.2050 0 0);
+      --color-sidebar-foreground:  oklch(0.9850 0 0);
+      --color-sidebar-primary:  oklch(0.4880 0.2430 264.3760);
+      --color-sidebar-primary-foreground:  oklch(0.9850 0 0);
+      --color-sidebar-accent:  oklch(0.2690 0 0);
+      --color-sidebar-accent-foreground:  oklch(0.9850 0 0);
+      --color-sidebar-border:  oklch(0.2750 0 0);
+      --color-sidebar-ring:  oklch(0.4390 0 0);
+    }
+  }
+}
