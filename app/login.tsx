@@ -72,9 +72,13 @@ function Field({
         'w-full rounded-md border border-black/15 bg-white/70 px-3 text-base text-black',
         className
       )}
-      // A fixed height with paddingVertical:0 keeps single-line text vertically
-      // centered — RN's default TextInput padding otherwise clips it in a short box.
-      style={{ height: 44, paddingVertical: 0 }}
+      style={[
+        {
+          height: 44,
+          paddingVertical: Platform.OS === 'ios' ? 12 : 0,
+          lineHeight: Platform.OS === 'ios' ? 20 : undefined,
+        },
+      ]}
       {...props}
     />
   );
@@ -152,7 +156,7 @@ export default function LoginScreen() {
     const fetchDistricts = async () => {
       try {
         setLoadingDistricts(true);
-        const response = await fetch('http://web.gradexis.app/districts.json');
+        const response = await fetch('https://web.gradexis.app/districts.json');
         if (!response.ok) {
           throw new Error('Failed to fetch districts');
         }
@@ -301,7 +305,7 @@ export default function LoginScreen() {
         (PLATFORM_MAPPING[d.platform] ?? d.platform).toLowerCase().includes(q) ||
         d.link.toLowerCase().includes(q)
     );
-  }, [search]);
+  }, [search, districts]);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],

@@ -13,7 +13,13 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification",
+          "processing"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -53,7 +59,8 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#93CEFF"
+          "color": "#93CEFF",
+          "enableBackgroundRemoteNotifications": true
         }
       ],
       "@react-native-community/datetimepicker"

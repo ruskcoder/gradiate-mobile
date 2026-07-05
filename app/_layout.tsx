@@ -3,6 +3,7 @@ import { applyColorTheme } from '@/lib/apply-color-theme';
 import { AppSettingsProvider } from '@/lib/app-settings';
 import { DEFAULT_COLOR_THEME_ID, getColorThemeById } from '@/lib/color-themes';
 import { setGradesNotificationsEnabled } from '@/lib/grades-notifications-task';
+import { subscribeForPush } from '@/lib/push-subscribe';
 import { useCurrentUser, useStore } from '@/lib/store';
 import { NAV_THEME } from '@/lib/theme';
 import { useColorScheme } from '@/lib/useColorScheme';
@@ -72,6 +73,10 @@ function AppContent() {
   // survives app restarts, since the OS can clear task registrations).
   React.useEffect(() => {
     setGradesNotificationsEnabled(!!user?.notificationsEnabled);
+    // Register this device's Expo push token with the API so the server's
+    // periodic trigger can wake us to fetch. Primary path; the background task
+    // above is the fallback. Safe to call on every load (API upserts).
+    subscribeForPush();
   }, [user?.notificationsEnabled]);
 
   // A background API call found the current session/password invalid (see

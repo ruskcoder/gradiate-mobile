@@ -88,8 +88,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         {tabBarIndicatorEnabled && (
           <Animated.View
             style={[{ width: tabWidth - indicatorInset * 2 }, indicatorStyle]}
-            className="absolute inset-y-1 rounded-lg left-0 bg-secondary"
-          />
+            className="absolute inset-y-1 rounded-lg left-0 overflow-hidden"
+            pointerEvents="none">
+            <BlurView
+              intensity={90}
+              tint={theme === 'dark' ? 'dark' : 'light'}
+              style={{ flex: 1 }}
+            />
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.2)' }]}
+            />
+          </Animated.View>
         )}
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;

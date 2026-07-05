@@ -226,7 +226,7 @@ function GradesTermPage({
     // The page always fills its parent regardless of the measured width; only
     // the shift/drift math in `TermPageShift` actually needs `stageWidth`.
     <View style={{ width: '100%', position: 'relative' }} pointerEvents={active ? 'auto' : 'none'}>
-      {showLoadingBlock && (
+      {showLoadingBlock && !error && (
         <Animated.View
           style={[
             showContentBlock ? { position: 'absolute', top: 0, left: 0, right: 0 } : undefined,

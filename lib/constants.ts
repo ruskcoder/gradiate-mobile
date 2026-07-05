@@ -1,5 +1,3 @@
-import hacDistricts from '@/lib/districts.json';
-
 export const APP_NAME = 'Gradexis';
 
 export const PLATFORMS = ['hac', 'skyward-legacy'] as const;
@@ -15,8 +13,6 @@ export interface District {
   link: string;
   loginType: string;
 }
-
-export const districts: District[] = [...(hacDistricts as District[])];
 
 export const LOGIN_TYPES = ['credentials', 'classlink'] as const;
 
