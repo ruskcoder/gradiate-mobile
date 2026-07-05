@@ -48,3 +48,6 @@ expo-env.d.ts
 .claude
 graphify-out/
 CLAUDE.md
+
+google-services.json
+gsa.json

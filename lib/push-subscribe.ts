@@ -58,16 +58,29 @@ export async function subscribeForPush(): Promise<void> {
     }
 
     const user = currentUser();
-    if (!user || !user.notificationsEnabled) return;
+    if (!user) {
+      console.log('Push subscribe skipped: no user logged in');
+      return;
+    }
+    if (!user.notificationsEnabled) {
+      console.log('Push subscribe skipped: notifications disabled in settings');
+      return;
+    }
 
     const granted = await requestPermission();
-    if (!granted) return;
+    if (!granted) {
+      console.log('Push subscribe skipped: notification permission not granted');
+      return;
+    }
 
     const projectId = getProjectId();
     const { data: token } = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined
     );
-    if (!token) return;
+    if (!token) {
+      console.log('Push subscribe skipped: no Expo push token returned');
+      return;
+    }
 
     // Register the background task the silent push wakes. Isolated so a native
     // config gap here still lets the token registration below succeed.
@@ -78,7 +91,7 @@ export async function subscribeForPush(): Promise<void> {
     }
 
     const base = API_URL.replace(/\/$/, '');
-    await fetch(`${base}/subscribe`, {
+    const res = await fetch(`${base}/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -86,6 +99,7 @@ export async function subscribeForPush(): Promise<void> {
         platform: 'expo',
       }),
     });
+    console.log(`Push subscribe -> ${base}/subscribe returned ${res.status} (token ${token})`);
   } catch (e) {
     console.warn('Push subscribe failed', e);
   }
