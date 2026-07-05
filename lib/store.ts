@@ -4,6 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { District } from './constants';
 import { PLATFORMS } from './constants';
 import type { ToolType } from './tool-types';
+import { deletePassword, loadPassword, savePassword } from './secure-credentials';
 
 type Platform = (typeof PLATFORMS)[number];
 
@@ -79,6 +80,53 @@ export interface User {
       Record<string, Array<{ loadedAt: number; average: any; categories: any; scores: any[] }>>
     >;
   };
+}
+
+type GradesHistory = User['gradesStore']['history'];
+
+/**
+ * Append this load's per-course snapshots into the term history, immutably.
+ * If a course's latest snapshot is byte-identical to the incoming one, its
+ * timestamp is refreshed in place instead of pushing a duplicate. Shared by
+ * `addGradesStore` (which also resets initialTerm/termList) and
+ * `addGradesStoreLoad` (which preserves them).
+ */
+function mergeClassesIntoHistory(
+  history: GradesHistory,
+  term: string,
+  classes: any[]
+): GradesHistory {
+  const newHistory = { ...history };
+  newHistory[term] = newHistory[term] ? { ...newHistory[term] } : {};
+
+  for (const classData of classes) {
+    const courseKey = `${classData.course}|${classData.name}`;
+    const existing = newHistory[term][courseKey];
+    const courseHistory = existing ? [...existing] : [];
+    newHistory[term][courseKey] = courseHistory;
+
+    const snapshot = {
+      loadedAt: Date.now(),
+      average: classData.average,
+      categories: classData.categories,
+      scores: classData.scores,
+    };
+
+    const latest = courseHistory[courseHistory.length - 1];
+    const unchanged =
+      latest &&
+      JSON.stringify(latest.average) === JSON.stringify(classData.average) &&
+      JSON.stringify(latest.categories) === JSON.stringify(classData.categories) &&
+      JSON.stringify(latest.scores) === JSON.stringify(classData.scores);
+
+    if (unchanged) {
+      courseHistory[courseHistory.length - 1] = snapshot;
+    } else {
+      courseHistory.push(snapshot);
+    }
+  }
+
+  return newHistory;
 }
 
 const DEFAULT_USER: User = {
@@ -224,6 +272,8 @@ export const useStore = create<UserStore>()(
 
       removeUser: (index: number) => {
         set((state) => {
+          const removed = state.users[index];
+          if (removed) void deletePassword(removed);
           const newUsers = state.users.filter((_, i) => i !== index);
           let newIndex = state.currentUserIndex;
 
@@ -388,59 +438,14 @@ export const useStore = create<UserStore>()(
       ) => {
         set((state) => {
           const newUsers = [...state.users];
-          if (newUsers[state.currentUserIndex]) {
-            const currentUser = newUsers[state.currentUserIndex]!;
-            const newHistory = { ...currentUser.gradesStore.history };
-            if (!newHistory[term]) {
-              newHistory[term] = {};
-            } else {
-              newHistory[term] = { ...newHistory[term] };
-            }
-
-            for (const classData of classes) {
-              const courseKey = `${classData.course}|${classData.name}`;
-              if (!newHistory[term][courseKey]) {
-                newHistory[term][courseKey] = [];
-              } else {
-                newHistory[term][courseKey] = [...newHistory[term][courseKey]];
-              }
-
-              const courseHistory = newHistory[term][courseKey];
-              if (courseHistory && courseHistory.length > 0) {
-                const latestEntry = courseHistory[courseHistory.length - 1];
-                if (
-                  latestEntry &&
-                  JSON.stringify(latestEntry.average) === JSON.stringify(classData.average) &&
-                  JSON.stringify(latestEntry.categories) ===
-                    JSON.stringify(classData.categories) &&
-                  JSON.stringify(latestEntry.scores) === JSON.stringify(classData.scores)
-                ) {
-                  courseHistory[courseHistory.length - 1] = {
-                    loadedAt: Date.now(),
-                    average: classData.average,
-                    categories: classData.categories,
-                    scores: classData.scores,
-                  };
-                  continue;
-                }
-              }
-
-              if (courseHistory) {
-                courseHistory.push({
-                  loadedAt: Date.now(),
-                  average: classData.average,
-                  categories: classData.categories,
-                  scores: classData.scores,
-                });
-              }
-            }
-
+          const currentUser = newUsers[state.currentUserIndex];
+          if (currentUser) {
             newUsers[state.currentUserIndex] = {
               ...currentUser,
               gradesStore: {
                 initialTerm,
                 termList,
-                history: newHistory,
+                history: mergeClassesIntoHistory(currentUser.gradesStore.history, term, classes),
               },
             } as User;
           }
@@ -451,59 +456,13 @@ export const useStore = create<UserStore>()(
       addGradesStoreLoad: (term: string, classes: any[]) => {
         set((state) => {
           const newUsers = [...state.users];
-          if (newUsers[state.currentUserIndex]) {
-            const currentUser = newUsers[state.currentUserIndex]!;
-            const newHistory = { ...currentUser.gradesStore.history };
-            if (!newHistory[term]) {
-              newHistory[term] = {};
-            } else {
-              newHistory[term] = { ...newHistory[term] };
-            }
-
-            for (const classData of classes) {
-              const courseKey = `${classData.course}|${classData.name}`;
-              if (!newHistory[term][courseKey]) {
-                newHistory[term][courseKey] = [];
-              } else {
-                newHistory[term][courseKey] = [...newHistory[term][courseKey]];
-              }
-
-              const courseHistory = newHistory[term][courseKey];
-              if (courseHistory && courseHistory.length > 0) {
-                const latestEntry = courseHistory[courseHistory.length - 1];
-
-                if (
-                  latestEntry &&
-                  JSON.stringify(latestEntry.average) === JSON.stringify(classData.average) &&
-                  JSON.stringify(latestEntry.categories) ===
-                    JSON.stringify(classData.categories) &&
-                  JSON.stringify(latestEntry.scores) === JSON.stringify(classData.scores)
-                ) {
-                  courseHistory[courseHistory.length - 1] = {
-                    loadedAt: Date.now(),
-                    average: classData.average,
-                    categories: classData.categories,
-                    scores: classData.scores,
-                  };
-                  continue;
-                }
-              }
-
-              if (courseHistory) {
-                courseHistory.push({
-                  loadedAt: Date.now(),
-                  average: classData.average,
-                  categories: classData.categories,
-                  scores: classData.scores,
-                });
-              }
-            }
-
+          const currentUser = newUsers[state.currentUserIndex];
+          if (currentUser) {
             newUsers[state.currentUserIndex] = {
               ...currentUser,
               gradesStore: {
                 ...currentUser.gradesStore,
-                history: newHistory,
+                history: mergeClassesIntoHistory(currentUser.gradesStore.history, term, classes),
               },
             } as User;
           }
@@ -595,8 +554,11 @@ export const useStore = create<UserStore>()(
     {
       name: 'user-store',
       storage: createJSONStorage(() => AsyncStorage),
+      // The password is deliberately stripped from the persisted (plaintext)
+      // AsyncStorage blob — it lives in the OS keystore instead (see
+      // secure-credentials.ts) and is rehydrated by hydrateSecureCredentials().
       partialize: (state) => ({
-        users: state.users,
+        users: state.users.map(({ password, ...rest }) => rest),
         currentUserIndex: state.currentUserIndex,
       }),
       onRehydrateStorage: () => (persistedState) => {
@@ -631,10 +593,61 @@ export const useStore = create<UserStore>()(
         } catch (e) {
           console.error(e);
         }
+        // Pull passwords back out of the keystore into memory once the rest of
+        // the state has rehydrated.
+        void hydrateSecureCredentials();
       },
     }
   )
 );
+
+// --- Secure credential mirroring -------------------------------------------
+// Keep the OS keystore in sync with the in-memory passwords, and load them back
+// on launch. Passwords never touch the persisted AsyncStorage blob.
+
+function passwordSnapshot(users: User[]): string {
+  return users.map((u) => `${u.platform}:${u.username}:${u.link}=${u.password || ''}`).join('|');
+}
+
+let lastPasswordSnapshot = '';
+useStore.subscribe((state) => {
+  const snapshot = passwordSnapshot(state.users);
+  if (snapshot === lastPasswordSnapshot) return;
+  lastPasswordSnapshot = snapshot;
+  for (const user of state.users) {
+    if (user.password) void savePassword(user, user.password);
+  }
+});
+
+/**
+ * Populate in-memory passwords from the keystore after rehydration. For any
+ * account that still carries a legacy plaintext password (from a pre-migration
+ * install's AsyncStorage blob) it migrates that into the keystore instead.
+ * Worst case if a password is missing everywhere: the user is asked to log in
+ * again — never a hard lockout.
+ */
+export async function hydrateSecureCredentials(): Promise<void> {
+  const users = useStore.getState().users;
+  if (users.length === 0) return;
+
+  const resolved = await Promise.all(
+    users.map(async (user) => {
+      if (user.password) {
+        // Legacy plaintext survived rehydration — migrate it into the keystore.
+        await savePassword(user, user.password);
+        return user;
+      }
+      const stored = await loadPassword(user);
+      return stored ? ({ ...user, password: stored } as User) : user;
+    })
+  );
+
+  // Only touch state if something actually changed, to avoid a redundant render.
+  if (resolved.some((u, i) => u.password !== users[i]!.password)) {
+    lastPasswordSnapshot = passwordSnapshot(resolved);
+    useStore.setState({ users: resolved });
+  }
+}
 
 export const useCurrentUser = () => {
   return useStore((state) => {

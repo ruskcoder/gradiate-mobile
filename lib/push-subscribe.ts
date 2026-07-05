@@ -99,7 +99,9 @@ export async function subscribeForPush(): Promise<void> {
         platform: 'expo',
       }),
     });
-    console.log(`Push subscribe -> ${base}/subscribe returned ${res.status} (token ${token})`);
+    // Don't log the token itself — it's a device credential and Hermes keeps
+    // console.* output in release builds.
+    console.log(`Push subscribe -> ${base}/subscribe returned ${res.status}`);
   } catch (e) {
     console.warn('Push subscribe failed', e);
   }

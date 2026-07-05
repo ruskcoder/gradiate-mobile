@@ -194,18 +194,34 @@ export async function login(
   return data;
 }
 
-export async function getAttendance(date?: string) {
+/**
+ * The shared body of every non-streaming, authenticated data fetch: check the
+ * cache, POST `{ loginType, loginData, options, session }`, run the auth-error
+ * handler on failure, persist the refreshed session, cache, and return.
+ *
+ * The eight endpoints differ only in their path, their `options`, whether a
+ * cached value may be reused (`forceRefresh`), and — for `/info` — whether the
+ * request is sent as a *fresh* login (empty session + blank `clsession`) rather
+ * than a resumed one. See `getInfo` for why `/info` is special.
+ */
+async function fetchEndpoint(
+  endpoint: string,
+  label: string,
+  {
+    options = {},
+    forceRefresh = false,
+    freshLogin = false,
+  }: { options?: Record<string, any>; forceRefresh?: boolean; freshLogin?: boolean } = {}
+) {
   const user = currentUser();
-  const session = getSession();
   if (!user) {
     throw new Error('No user logged in');
   }
 
-  const options = { date: date || '' };
-  const cacheKey = generateCacheKey(ATTENDANCE_ENDPOINT, options);
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
+  const cacheKey = generateCacheKey(endpoint, options);
+  if (!forceRefresh) {
+    const cachedData = getCachedValue(cacheKey);
+    if (cachedData) return cachedData;
   }
 
   const body = {
@@ -214,33 +230,35 @@ export async function getAttendance(date?: string) {
       username: user.username,
       password: user.password,
       link: user.link,
-      clsession: user.clsession,
+      clsession: freshLogin ? '' : user.clsession,
     },
-    options: options,
-    session: session,
+    options,
+    session: freshLogin ? {} : getSession(),
   };
 
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], ATTENDANCE_ENDPOINT);
+  const url = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], endpoint);
 
-  const response = await fetch(endpoint, {
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 
   const data = await response.json();
 
-  if (!response.ok || data.success == false) {
+  if (!response.ok || data.success === false) {
     handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch attendance with status code ' + response.status);
+    throw new Error(data.message || `Failed to fetch ${label} with status code ${response.status}`);
   }
   if (data.session) setSession(data.session);
 
   setCachedValue(cacheKey, data);
 
   return data;
+}
+
+export function getAttendance(date?: string) {
+  return fetchEndpoint(ATTENDANCE_ENDPOINT, 'attendance', { options: { date: date || '' } });
 }
 
 export async function* getClasses(term?: string) {
@@ -317,359 +335,48 @@ export async function* getClasses(term?: string) {
   }
 }
 
-export async function getSingleClass(
+export function getSingleClass(
   term: string,
   course: string,
   opts?: { subterm?: string; forceRefresh?: boolean }
 ) {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
   const subterm = opts?.subterm;
-  const forceRefresh = opts?.forceRefresh === true;
-
-  const options = subterm && subterm !== 'All' ? { term: subterm, course } : { term, course };
-  const cacheKey = generateCacheKey(SINGLE_CLASS_ENDPOINT, options);
-
-  if (!forceRefresh) {
-    const cachedData = getCachedValue(cacheKey);
-    if (cachedData) {
-      return cachedData;
-    }
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: options,
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], SINGLE_CLASS_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+  const options =
+    subterm && subterm !== 'All' ? { term: subterm, course } : { term, course };
+  return fetchEndpoint(SINGLE_CLASS_ENDPOINT, 'single class', {
+    options,
+    forceRefresh: opts?.forceRefresh === true,
   });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success === false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch single class with status code ' + response.status);
-  }
-
-  if (data.session) setSession(data.session);
-  setCachedValue(cacheKey, data);
-
-  return data;
 }
 
-export async function getSchedule() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(SCHEDULE_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: {},
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], SCHEDULE_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch schedule with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+export function getSchedule() {
+  return fetchEndpoint(SCHEDULE_ENDPOINT, 'schedule');
 }
 
-export async function getTranscript() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(TRANSCRIPT_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: {},
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], TRANSCRIPT_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch transcript with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+export function getTranscript() {
+  return fetchEndpoint(TRANSCRIPT_ENDPOINT, 'transcript');
 }
 
-export async function getReportCard() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(REPORT_CARD_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: {},
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], REPORT_CARD_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch report card with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+export function getReportCard() {
+  return fetchEndpoint(REPORT_CARD_ENDPOINT, 'report card');
 }
 
-export async function getProgressReport() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(PROGRESS_REPORT_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: {},
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], PROGRESS_REPORT_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch progress report with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+export function getProgressReport() {
+  return fetchEndpoint(PROGRESS_REPORT_ENDPOINT, 'progress report');
 }
 
-export async function getTeachers() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(TEACHERS_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: user.clsession,
-    },
-    options: {},
-    session: session,
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], TEACHERS_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch teachers with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+export function getTeachers() {
+  return fetchEndpoint(TEACHERS_ENDPOINT, 'teachers');
 }
 
-export async function getInfo() {
-  const user = currentUser();
-  const session = getSession();
-  if (!user) {
-    throw new Error('No user logged in');
-  }
-
-  const cacheKey = generateCacheKey(INFO_ENDPOINT, {});
-  const cachedData = getCachedValue(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-
-  // INFO_ENDPOINT is the same `/info` route `login()` posts to, and the
-  // backend treats it as a fresh login rather than a resumed session — it
-  // re-authenticates with username/password/link and scrapes the profile
-  // page itself. It still needs `link` to know which portal to hit (omitting
-  // it made the backend unable to build a target URL at all). What it can't
-  // have is the *resumed* `clsession` the other already-authenticated
-  // endpoints send (getAttendance, getClasses, etc.) — that sent it down a
-  // different server-side branch that fetched the wrong page, and cheerio
-  // tried to load that (non-string) response and crashed. So send `link`
-  // like `login()` does, and send an empty session like a fresh login.
-  const body = {
-    loginType: user.loginType,
-    loginData: {
-      username: user.username,
-      password: user.password,
-      link: user.link,
-      clsession: '',
-    },
-    options: {},
-    session: {},
-  };
-
-  const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], INFO_ENDPOINT);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || data.success == false) {
-    handleAuthError(response, data);
-    throw new Error(data.message || 'Failed to fetch account info with status code ' + response.status);
-  }
-  if (data.session) setSession(data.session);
-
-  setCachedValue(cacheKey, data);
-
-  return data;
+// INFO_ENDPOINT is the same `/info` route `login()` posts to, and the backend
+// treats it as a fresh login rather than a resumed session — it re-authenticates
+// with username/password/link and scrapes the profile page itself. It still
+// needs `link` to know which portal to hit, but it can't have the *resumed*
+// `clsession` the other endpoints send (that sent it down a different
+// server-side branch that fetched the wrong page, and cheerio crashed loading a
+// non-string response). So `freshLogin` sends a blank `clsession` and an empty
+// session, exactly like `login()`.
+export function getInfo() {
+  return fetchEndpoint(INFO_ENDPOINT, 'account info', { freshLogin: true });
 }
