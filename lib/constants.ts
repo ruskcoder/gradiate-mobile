@@ -19,7 +19,7 @@ export const LOGIN_TYPES = ['credentials', 'classlink'] as const;
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gradexis.app/';
 
 export const API_PLATFORM_ENDPOINTS: Record<(typeof PLATFORMS)[number], string> = {
-  hac: '/v2/hac/',
+  hac: '/hac/',
   'skyward-legacy': '/skyward-legacy/',
 };
 

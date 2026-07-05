@@ -85,7 +85,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           // themed surface reads as an intentional frosted bar and costs nothing.
           <View style={StyleSheet.absoluteFill} className="bg-card" />
         )}
-        {tabBarIndicatorEnabled && (
+        {tabBarIndicatorEnabled && Platform.OS === 'ios' ? (
           <Animated.View
             style={[{ width: tabWidth - indicatorInset * 2 }, indicatorStyle]}
             className="absolute inset-y-1 rounded-lg left-0 overflow-hidden"
@@ -99,7 +99,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               style={[StyleSheet.absoluteFill, { backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.2)' }]}
             />
           </Animated.View>
-        )}
+        ) : tabBarIndicatorEnabled ? (
+          <Animated.View
+            style={[{ width: tabWidth - indicatorInset * 2 }, indicatorStyle]}
+            className="absolute inset-y-1 rounded-lg left-0 bg-secondary"
+          />
+        ) : null}
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
           const IconComponent = TAB_ICONS[route.name] ?? GraduationCap;

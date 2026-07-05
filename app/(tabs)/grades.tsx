@@ -226,19 +226,23 @@ function GradesTermPage({
     // The page always fills its parent regardless of the measured width; only
     // the shift/drift math in `TermPageShift` actually needs `stageWidth`.
     <View style={{ width: '100%', position: 'relative' }} pointerEvents={active ? 'auto' : 'none'}>
-      {showLoadingBlock && !error && (
+      {showLoadingBlock && (
         <Animated.View
           style={[
             showContentBlock ? { position: 'absolute', top: 0, left: 0, right: 0 } : undefined,
             animationsEnabled ? loadingAnimatedStyle : undefined,
           ]}>
           <View className="items-center gap-3 py-6">
-            <Text className="text-sm text-muted-foreground">{displayProgress?.message}</Text>
-            <Progress
-              value={displayProgress?.percent ?? 0}
-              indicatorClassName="bg-primary"
-              className="w-full"
-            />
+            {!error && (
+              <>
+                <Text className="text-sm text-muted-foreground">{displayProgress?.message}</Text>
+                <Progress
+                  value={displayProgress?.percent ?? 0}
+                  indicatorClassName="bg-primary"
+                  className="w-full"
+                />
+              </>
+            )}
             {/* Kept mounted for the block's whole visible life (not just while
                 `dataStillLoading`) so that on press it fades out with the rest of the
                 progress block as one unit instead of popping away first. Only
