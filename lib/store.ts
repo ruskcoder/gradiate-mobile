@@ -4,7 +4,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { District } from './constants';
 import { PLATFORMS } from './constants';
 import type { ToolType } from './tool-types';
-import { deletePassword, loadPassword, savePassword } from './secure-credentials';
+import {
+  deletePassword,
+  loadClMFA,
+  loadPassword,
+  saveClMFA,
+  savePassword,
+} from './secure-credentials';
 
 type Platform = (typeof PLATFORMS)[number];
 
@@ -33,12 +39,32 @@ export interface Shortcut {
 }
 
 export interface User {
-  loginType: '' | 'credentials' | 'classlink';
+  loginType: '' | 'credentials' | 'classlink' | 'classlinkCredentials' | 'microsoftSession';
   username: string;
   password: string;
   platform: Platform;
   link: string;
   clsession: string;
+  // Portal cookies captured from the Microsoft-SSO WebView handoff
+  // (loginType 'microsoftSession'). Sent with each request so the API can ride
+  // the same session; refreshed by re-running the WebView when they expire.
+  psCookies?: string;
+  // Multi-student portals (e.g. a PowerSchool parent account): the chosen
+  // student's id, threaded into every data request; `students` is the full
+  // roster the login picker surfaced.
+  studentId?: string;
+  students?: { id: string; name: string }[];
+  // ClassLink district code (the trailing segment of a launchpad link), sent as
+  // `code` for `classlinkCredentials` logins. Empty for other login types.
+  code: string;
+  // The stored answer to this account's ClassLink 2FA challenge — a fixed PIN
+  // string or the chosen icon filename — so re-auth on app open is silent. Kept
+  // in the OS keystore like the password (see secure-credentials.ts), never in
+  // the plaintext AsyncStorage blob. Empty when the account has no 2FA.
+  clMFA: string;
+  // Which kind of 2FA this account uses ('pin' | 'image' | ''), so the login
+  // popover knows what to render on a forced re-verify.
+  mfaType: '' | 'pin' | 'image';
   name: string;
   avatar: string;
   district: string;
@@ -91,38 +117,72 @@ type GradesHistory = User['gradesStore']['history'];
  * `addGradesStore` (which also resets initialTerm/termList) and
  * `addGradesStoreLoad` (which preserves them).
  */
+function pushSnapshot(
+  termBucket: Record<string, Array<{ loadedAt: number; average: any; categories: any; scores: any[] }>>,
+  courseKey: string,
+  snapshot: { loadedAt: number; average: any; categories: any; scores: any[] }
+): void {
+  const courseHistory = termBucket[courseKey] ? [...termBucket[courseKey]] : [];
+  termBucket[courseKey] = courseHistory;
+  const latest = courseHistory[courseHistory.length - 1];
+  const unchanged =
+    latest &&
+    JSON.stringify(latest.average) === JSON.stringify(snapshot.average) &&
+    JSON.stringify(latest.categories) === JSON.stringify(snapshot.categories) &&
+    JSON.stringify(latest.scores) === JSON.stringify(snapshot.scores);
+  if (unchanged) courseHistory[courseHistory.length - 1] = snapshot;
+  else courseHistory.push(snapshot);
+}
+
+/**
+ * Append this load's per-course snapshots into the term history, immutably —
+ * platform-agnostic so one storage model serves every portal:
+ *
+ *  - Inline single-term data (HAC's /classes, or any /single-class detail):
+ *    the class carries average/categories/scores for ONE term -> stored under `term`.
+ *  - Averages-only data (Skyward's /classes): the class carries an `averages`
+ *    dict keyed by every term/subterm label and no scores -> a numeric-average
+ *    snapshot is recorded under EACH label at once, so history, timeline and
+ *    "Load from Storage" have every term without extra fetches.
+ */
 function mergeClassesIntoHistory(
   history: GradesHistory,
   term: string,
   classes: any[]
 ): GradesHistory {
   const newHistory = { ...history };
-  newHistory[term] = newHistory[term] ? { ...newHistory[term] } : {};
+  const ensureTerm = (t: string) => {
+    newHistory[t] = newHistory[t] ? { ...newHistory[t] } : {};
+    return newHistory[t];
+  };
 
   for (const classData of classes) {
     const courseKey = `${classData.course}|${classData.name}`;
-    const existing = newHistory[term][courseKey];
-    const courseHistory = existing ? [...existing] : [];
-    newHistory[term][courseKey] = courseHistory;
+    const hasDetail =
+      (Array.isArray(classData.scores) && classData.scores.length > 0) ||
+      (classData.categories && Object.keys(classData.categories).length > 0);
+    const averagesDict =
+      classData.averages && typeof classData.averages === 'object' ? classData.averages : null;
 
-    const snapshot = {
-      loadedAt: Date.now(),
-      average: classData.average,
-      categories: classData.categories,
-      scores: classData.scores,
-    };
-
-    const latest = courseHistory[courseHistory.length - 1];
-    const unchanged =
-      latest &&
-      JSON.stringify(latest.average) === JSON.stringify(classData.average) &&
-      JSON.stringify(latest.categories) === JSON.stringify(classData.categories) &&
-      JSON.stringify(latest.scores) === JSON.stringify(classData.scores);
-
-    if (unchanged) {
-      courseHistory[courseHistory.length - 1] = snapshot;
+    if (!hasDetail && averagesDict) {
+      for (const label of Object.keys(averagesDict)) {
+        const avg = averagesDict[label];
+        if (avg === undefined || avg === null || avg === '' || isNaN(parseFloat(avg))) continue;
+        pushSnapshot(ensureTerm(label), courseKey, {
+          loadedAt: Date.now(),
+          average: avg,
+          categories: undefined,
+          scores: undefined as any,
+        });
+      }
     } else {
-      courseHistory.push(snapshot);
+      const average = classData.average ?? (averagesDict ? averagesDict[term] : undefined);
+      pushSnapshot(ensureTerm(term), courseKey, {
+        loadedAt: Date.now(),
+        average,
+        categories: classData.categories,
+        scores: classData.scores,
+      });
     }
   }
 
@@ -136,6 +196,12 @@ const DEFAULT_USER: User = {
   platform: 'hac',
   link: '',
   clsession: '',
+  psCookies: '',
+  studentId: '',
+  students: [],
+  code: '',
+  clMFA: '',
+  mfaType: '',
   name: '',
   avatar: '',
   district: '',
@@ -554,11 +620,12 @@ export const useStore = create<UserStore>()(
     {
       name: 'user-store',
       storage: createJSONStorage(() => AsyncStorage),
-      // The password is deliberately stripped from the persisted (plaintext)
-      // AsyncStorage blob — it lives in the OS keystore instead (see
-      // secure-credentials.ts) and is rehydrated by hydrateSecureCredentials().
+      // The password and the ClassLink 2FA answer are deliberately stripped from
+      // the persisted (plaintext) AsyncStorage blob — they live in the OS
+      // keystore instead (see secure-credentials.ts) and are rehydrated by
+      // hydrateSecureCredentials().
       partialize: (state) => ({
-        users: state.users.map(({ password, ...rest }) => rest),
+        users: state.users.map(({ password, clMFA, ...rest }) => rest),
         currentUserIndex: state.currentUserIndex,
       }),
       onRehydrateStorage: () => (persistedState) => {
@@ -606,7 +673,9 @@ export const useStore = create<UserStore>()(
 // on launch. Passwords never touch the persisted AsyncStorage blob.
 
 function passwordSnapshot(users: User[]): string {
-  return users.map((u) => `${u.platform}:${u.username}:${u.link}=${u.password || ''}`).join('|');
+  return users
+    .map((u) => `${u.platform}:${u.username}:${u.link}=${u.password || ''}/${u.clMFA || ''}`)
+    .join('|');
 }
 
 let lastPasswordSnapshot = '';
@@ -616,6 +685,7 @@ useStore.subscribe((state) => {
   lastPasswordSnapshot = snapshot;
   for (const user of state.users) {
     if (user.password) void savePassword(user, user.password);
+    if (user.clMFA) void saveClMFA(user, user.clMFA);
   }
 });
 
@@ -632,18 +702,27 @@ export async function hydrateSecureCredentials(): Promise<void> {
 
   const resolved = await Promise.all(
     users.map(async (user) => {
+      let next = user;
       if (user.password) {
         // Legacy plaintext survived rehydration — migrate it into the keystore.
         await savePassword(user, user.password);
-        return user;
+      } else {
+        const stored = await loadPassword(user);
+        if (stored) next = { ...next, password: stored } as User;
       }
-      const stored = await loadPassword(user);
-      return stored ? ({ ...user, password: stored } as User) : user;
+      // The 2FA answer lives only in the keystore, so always try to rehydrate it.
+      if (user.clMFA) {
+        await saveClMFA(user, user.clMFA);
+      } else {
+        const storedMfa = await loadClMFA(user);
+        if (storedMfa) next = { ...next, clMFA: storedMfa } as User;
+      }
+      return next;
     })
   );
 
   // Only touch state if something actually changed, to avoid a redundant render.
-  if (resolved.some((u, i) => u.password !== users[i]!.password)) {
+  if (resolved.some((u, i) => u.password !== users[i]!.password || u.clMFA !== users[i]!.clMFA)) {
     lastPasswordSnapshot = passwordSnapshot(resolved);
     useStore.setState({ users: resolved });
   }

@@ -9,6 +9,8 @@ export interface ClassData {
   average: string | number;
   categories?: Record<string, any>;
   scores?: any[];
+  // Present for a semester (Skyward SM1/SM2): its component terms.
+  groups?: Record<string, any>;
 }
 
 /**
@@ -45,13 +47,16 @@ export function useClassData(id?: string, name?: string, average?: string, term?
         const result = await getSingleClass(term, id);
         if (cancelled) return;
         if (result.success && result.class) {
-          const transformed = transformGroupsToCategories(result.class);
+          const raw = result.class;
+          const transformed = transformGroupsToCategories(raw);
+          const groups = raw.groups && typeof raw.groups === 'object' ? raw.groups : undefined;
           setClassData({
             course: id,
             name: transformed.name ?? name ?? '',
             average: transformed.average ?? average ?? 0,
             categories: transformed.categories ?? {},
             scores: transformed.scores ?? [],
+            groups: groups && Object.keys(groups).length > 1 ? groups : undefined,
           });
         }
       } catch (e: any) {

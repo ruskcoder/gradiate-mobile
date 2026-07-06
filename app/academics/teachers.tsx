@@ -37,10 +37,15 @@ export default function TeachersScreen() {
         setLoading(true);
         const data = await getTeachers();
         if (data.success && Array.isArray(data.teachers)) {
+          // Email is optional — some portals (Skyward) don't expose it. Keep any
+          // entry with a teacher name; dedupe by email when present, else by the
+          // teacher/class pair so those portals still list every teacher.
           const seen = new Set<string>();
           const unique = data.teachers.filter((t: Teacher) => {
-            if (!t.teacher || !t.email || seen.has(t.email)) return false;
-            seen.add(t.email);
+            if (!t.teacher) return false;
+            const key = t.email || `${t.teacher}|${(t as any).class ?? ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
             return true;
           });
           setTeachers(unique);
@@ -77,8 +82,9 @@ export default function TeachersScreen() {
               squareColor="var(--primary)"
               squareText={getInitials(teacher.teacher)}
               title={teacher.teacher}
-              desc={teacher.email}
+              desc={teacher.email || (teacher as any).class || ''}
               rightContent={
+                teacher.email ? (
                 <Button
                   variant="outline"
                   size="icon"
@@ -90,6 +96,7 @@ export default function TeachersScreen() {
                     <Icon as={Copy} className="size-4" />
                   )}
                 </Button>
+                ) : undefined
               }
             />
           ))}

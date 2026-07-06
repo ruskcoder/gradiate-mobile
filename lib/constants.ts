@@ -1,10 +1,11 @@
 export const APP_NAME = 'Gradexis';
 
-export const PLATFORMS = ['hac', 'skyward-legacy'] as const;
+export const PLATFORMS = ['hac', 'skyward-legacy', 'powerschool'] as const;
 
 export const PLATFORM_MAPPING: Record<string, string> = {
   hac: 'HAC',
   'skyward-legacy': 'Skyward Legacy',
+  powerschool: 'PowerSchool',
 };
 
 export interface District {
@@ -12,15 +13,45 @@ export interface District {
   platform: string;
   link: string;
   loginType: string;
+  // ClassLink district code, carried through the re-auth path for
+  // classlinkCredentials accounts (whose `link` is the discovered portal, not
+  // the launchpad link the code comes from).
+  code?: string;
 }
 
-export const LOGIN_TYPES = ['credentials', 'classlink'] as const;
+export const LOGIN_TYPES = [
+  'credentials',
+  'classlink',
+  'classlinkCredentials',
+  // Microsoft SSO via a WebView cookie handoff: the user signs in through
+  // Microsoft's real page and we hand the resulting portal cookies to the API.
+  'microsoftSession',
+] as const;
+
+// The ClassLink launchpad prefix shown before the editable part of the link
+// field. Users only type their district code (e.g. `katyisd`); the full link is
+// `CLASSLINK_LAUNCHPAD_BASE + code`.
+export const CLASSLINK_LAUNCHPAD_BASE = 'launchpad.classlink.com/';
+
+// Pull the district `code` out of a ClassLink launchpad link. Accepts a bare
+// code, a full `launchpad.classlink.com/<code>` URL (with or without scheme),
+// or anything in between; returns the trailing path segment.
+export function classlinkCodeFromLink(link: string): string {
+  if (!link) return '';
+  const cleaned = link
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^launchpad\.classlink\.com\//i, '')
+    .replace(/^\/+/, '');
+  return cleaned.split(/[/?#]/)[0]!.trim();
+}
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gradexis.app/';
 
 export const API_PLATFORM_ENDPOINTS: Record<(typeof PLATFORMS)[number], string> = {
   hac: '/hac/',
   'skyward-legacy': '/skyward-legacy/',
+  powerschool: '/powerschool/',
 };
 
 export const LOGIN_ENDPOINT = '/info';
@@ -29,10 +60,13 @@ export const CLASSES_ENDPOINT = '/classes';
 export const SINGLE_CLASS_ENDPOINT = '/single-class';
 export const ATTENDANCE_ENDPOINT = '/attendance';
 export const SCHEDULE_ENDPOINT = '/schedule';
+export const BELL_SCHEDULE_ENDPOINT = '/bellSchedule';
 export const TRANSCRIPT_ENDPOINT = '/transcript';
 export const REPORT_CARD_ENDPOINT = '/reportCard';
 export const PROGRESS_REPORT_ENDPOINT = '/ipr';
 export const TEACHERS_ENDPOINT = '/teachers';
+export const DISTRICTS_ENDPOINT = '/districts';
+export const AUTH_METHODS_ENDPOINT = '/authMethods';
 
 // Grades list/card reveal animation. Each item fades and slides up on mount,
 // offset from the previous one by a constant stagger delay so they cascade in

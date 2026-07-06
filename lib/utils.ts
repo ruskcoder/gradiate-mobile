@@ -29,84 +29,44 @@ export function transformGroupsToCategories(classData: any) {
 
   const groups = classData.groups;
   const groupNames = Object.keys(groups);
+  if (groupNames.length === 0) return classData;
 
-  if (groupNames.length === 0) {
-    return classData;
-  }
+  const multi = groupNames.length > 1;
+  const categories: Record<string, any> = {};
+  const scores: any[] = [];
 
-  const transformedCategories: Record<string, any> = {};
-  const transformedScores: any[] = [];
-
-  groupNames.forEach((groupName) => {
+  for (const groupName of groupNames) {
     const group = groups[groupName];
-    if (!group) return;
+    if (!group) continue;
+    const catKey = (catName: string) => (multi ? `${groupName} - ${catName}` : catName);
 
-    const groupWeight = parseFloat(group.weight) || 0;
-    const hasNestedCategories = group.categories && Object.keys(group.categories).length > 0;
-
-    if (!hasNestedCategories) {
-      const categoryName = groupNames.length > 1 ? `Major Grade - ${groupName}` : groupName;
-      const categoryWeight = groupWeight;
-      const grade = parseFloat(group.grade) || 0;
-
-      transformedCategories[categoryName] = {
-        categoryWeight: categoryWeight.toFixed(2),
-        percent: grade.toFixed(3),
-        studentsPoints: 0,
-        maximumPoints: 0,
-      };
-
-      if (group.scores && Array.isArray(group.scores)) {
-        group.scores.forEach((score: any) => {
-          transformedScores.push({ ...score, category: categoryName });
-        });
-      }
-    } else {
-      Object.entries(group.categories).forEach(([catName, catData]: [string, any]) => {
-        const nestedCatWeight = parseFloat(catData.weight) || 1;
-        const effectiveWeight = (groupWeight * nestedCatWeight) / 100;
-
-        const categoryName = groupNames.length > 1 ? `${groupName} - ${catName}` : catName;
-
-        const grade = parseFloat(catData.grade) || 0;
-
-        transformedCategories[categoryName] = {
-          categoryWeight: effectiveWeight.toFixed(2),
-          percent: grade.toFixed(3),
-          studentsPoints: 0,
-          maximumPoints: 0,
-        };
-
-        if (catData.scores && Array.isArray(catData.scores)) {
-          catData.scores.forEach((score: any) => {
-            transformedScores.push({ ...score, category: categoryName });
-          });
-        }
-      });
-
-      if (group.scores && Array.isArray(group.scores) && group.scores.length > 0) {
-        const categoryName =
-          groupNames.length > 1 ? `Major Grade - ${groupName}` : `${groupName} - Other`;
-
-        if (!transformedCategories[categoryName]) {
-          transformedCategories[categoryName] = {
-            categoryWeight: groupWeight.toFixed(2),
-            percent: '0.000',
-            studentsPoints: 0,
-            maximumPoints: 0,
-          };
-        }
-
-        group.scores.forEach((score: any) => {
-          transformedScores.push({ ...score, category: categoryName });
-        });
+    // Keep each nested category's real stats (points / percent / weight).
+    if (group.categories && typeof group.categories === 'object') {
+      for (const [catName, catData] of Object.entries(group.categories)) {
+        categories[catKey(catName)] = { ...(catData as any) };
       }
     }
-  });
+
+    // Assign every assignment to its own (group-prefixed) category, matching the
+    // nested category it belongs to instead of collapsing them into one bucket.
+    const groupScores = Array.isArray(group.scores) ? group.scores : [];
+    for (const sc of groupScores) {
+      const cat = catKey(sc.category || 'Other');
+      if (!categories[cat]) {
+        categories[cat] = {
+          categoryWeight: (parseFloat(group.weight) || 0).toFixed(2),
+          percent: '0.000',
+          studentsPoints: '0',
+          maximumPoints: '0',
+        };
+      }
+      scores.push({ ...sc, category: cat });
+    }
+  }
 
   return {
     ...classData,
-    categories: transformedCategories,
-    scores: transformedScores.length > 0 ? transformedScores : classData.scores || [],
+    categories,
+    scores: scores.length > 0 ? scores : classData.scores || [],
   };
 }

@@ -2,7 +2,9 @@ import {
   API_PLATFORM_ENDPOINTS,
   API_URL,
   ATTENDANCE_ENDPOINT,
+  AUTH_METHODS_ENDPOINT,
   CLASSES_ENDPOINT,
+  DISTRICTS_ENDPOINT,
   INFO_ENDPOINT,
   LOGIN_ENDPOINT,
   LOGIN_TYPES,
@@ -10,6 +12,7 @@ import {
   PROGRESS_REPORT_ENDPOINT,
   REPORT_CARD_ENDPOINT,
   SCHEDULE_ENDPOINT,
+  BELL_SCHEDULE_ENDPOINT,
   SINGLE_CLASS_ENDPOINT,
   TEACHERS_ENDPOINT,
   TRANSCRIPT_ENDPOINT,
@@ -41,11 +44,20 @@ function setCachedValue(key: string, value: any): void {
  * the caller's own catch block can still surface the message inline.
  */
 function handleAuthError(response: Response, data: any): void {
+  const msg: string = data?.message || '';
   const isAuthError =
     response.status === 401 ||
-    data?.message?.includes('Invalid') ||
-    data?.message?.includes('password') ||
-    data?.message?.includes('Session');
+    // A data call that comes back needing a fresh ClassLink 2FA answer (the
+    // stored one stopped working, or none is stored) can't be resolved inline —
+    // send the user back to the login screen to re-verify.
+    data?.mfaRequired === true ||
+    msg.includes('Invalid') ||
+    msg.includes('password') ||
+    msg.includes('Session') ||
+    msg.includes('PIN') ||
+    msg.includes('image') ||
+    msg.includes('two-factor') ||
+    msg.includes('ClassLink');
 
   if (isAuthError) {
     const user = currentUser();
@@ -57,6 +69,7 @@ function handleAuthError(response: Response, data: any): void {
           platform: user.platform,
           link: user.link,
           loginType: user.loginType,
+          code: user.code,
         },
       });
     }
@@ -159,13 +172,35 @@ async function* streamPost(endpoint: string, body: any): AsyncGenerator<any> {
   }
 }
 
+/**
+ * Authenticate against a platform.
+ *
+ * Returns the raw API response. Two non-error shapes the caller must handle:
+ *   - `{ success: true, ... }`  — logged in.
+ *   - `{ mfaRequired: true, mfaType, icons? }` — a ClassLink second factor is
+ *     needed. The mid-challenge session is persisted here; the caller shows the
+ *     2FA prompt and calls `login` again with `loginDetails.clMFA` set (a PIN
+ *     string or the chosen icon filename) to finish.
+ *
+ * For `classlinkCredentials` the first attempt is sent as a *fresh* login (empty
+ * session), and only the 2FA follow-up (`clMFA` present) reuses the stored
+ * challenge session — so a leftover session from another account can't hijack a
+ * brand-new ClassLink login.
+ */
 export async function login(
   platform: Platform,
   loginType: LoginType,
   loginDetails: Record<string, string>,
   referralCode: string = ''
 ) {
-  const session = getSession();
+  const isClassLinkCreds = loginType === 'classlinkCredentials';
+  const isMfaResume = isClassLinkCreds && !!loginDetails.clMFA;
+  // A fresh Microsoft cookie handoff must start from an empty session, or the API
+  // could reuse a still-fresh session from a previous account instead of seeding
+  // the just-captured cookies.
+  const isFreshCookieLogin = loginType === 'microsoftSession';
+  const session = (isClassLinkCreds && !isMfaResume) || isFreshCookieLogin ? {} : getSession();
+
   const body = {
     loginType: loginType,
     loginData: loginDetails,
@@ -187,11 +222,74 @@ export async function login(
 
   const data = await response.json();
 
+  // A 2FA challenge comes back as `success: false, mfaRequired: true`. Persist
+  // the challenge-carrying session and hand it back rather than treating it as a
+  // failure, so the caller can prompt for the second factor and resume.
+  if (data?.mfaRequired) {
+    if (data.session) setSession(data.session);
+    return data;
+  }
+
   if (!response.ok || data.success == false) {
     throw new Error(data.message || 'Login failed with status code ' + response.status);
   }
   if (data.session) setSession(data.session);
   return data;
+}
+
+/**
+ * Ask the API whether a portal `link` fronts multiple districts (a shared HAC
+ * login `<select>`). Used by the Custom-login flow's "fetch details" step to
+ * decide whether to show a district picker. Never throws — on any failure it
+ * reports a single-district link so login can proceed.
+ */
+export async function fetchDistrictDetails(
+  platform: Platform,
+  link: string
+): Promise<{ multiple: boolean; districts: { name: string; value: string }[] }> {
+  try {
+    const url = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[platform], DISTRICTS_ENDPOINT);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loginData: { link } }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) return { multiple: false, districts: [] };
+    return { multiple: !!data.multiple, districts: data.districts || [] };
+  } catch {
+    return { multiple: false, districts: [] };
+  }
+}
+
+/**
+ * Ask the API which sign-in methods a district's portal offers
+ * ({ credentials, microsoft, ssoUrl }), so the login screen can show the right
+ * buttons (some PowerSchool districts are credentials-only, others
+ * Microsoft-SSO-only). Never throws — on any failure it reports credentials-only
+ * so the user can still sign in the normal way.
+ */
+export async function fetchAuthMethods(
+  platform: Platform,
+  link: string
+): Promise<{ credentials: boolean; microsoft: boolean; ssoUrl: string | null }> {
+  try {
+    const url = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[platform], AUTH_METHODS_ENDPOINT);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loginData: { link } }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) return { credentials: true, microsoft: false, ssoUrl: null };
+    return {
+      credentials: data.credentials !== false,
+      microsoft: !!data.microsoft,
+      ssoUrl: data.ssoUrl || null,
+    };
+  } catch {
+    return { credentials: true, microsoft: false, ssoUrl: null };
+  }
 }
 
 /**
@@ -218,11 +316,20 @@ async function fetchEndpoint(
     throw new Error('No user logged in');
   }
 
+  // Multi-student portals: pin every request to the chosen student.
+  if (user.studentId) options = { ...options, studentId: user.studentId };
+
   const cacheKey = generateCacheKey(endpoint, options);
   if (!forceRefresh) {
     const cachedData = getCachedValue(cacheKey);
     if (cachedData) return cachedData;
   }
+
+  // A Microsoft-SSO account has no password — its auth is the captured portal
+  // cookies, which the API re-seeds from `loginData.cookies`. So it must never be
+  // sent as a "fresh login" (which blanks the session) — the cookies ARE the login.
+  const isMsSession = user.loginType === 'microsoftSession';
+  const effectiveFresh = freshLogin && !isMsSession;
 
   const body = {
     loginType: user.loginType,
@@ -230,10 +337,17 @@ async function fetchEndpoint(
       username: user.username,
       password: user.password,
       link: user.link,
-      clsession: freshLogin ? '' : user.clsession,
+      clsession: effectiveFresh ? '' : user.clsession,
+      // Portal cookies for a Microsoft-SSO account (empty otherwise).
+      cookies: user.psCookies,
+      // Carried so the API can silently re-run a ClassLink login (clearing 2FA
+      // with the stored answer) if the portal session has expired. Empty for
+      // non-ClassLink accounts.
+      code: user.code,
+      clMFA: user.clMFA,
     },
     options,
-    session: freshLogin ? {} : getSession(),
+    session: effectiveFresh ? {} : getSession(),
   };
 
   const url = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], endpoint);
@@ -268,7 +382,8 @@ export async function* getClasses(term?: string) {
     throw new Error('No user logged in');
   }
 
-  const options = { term: term || '' };
+  const options: Record<string, any> = { term: term || '' };
+  if (user.studentId) options.studentId = user.studentId;
   const cacheKey = generateCacheKey(CLASSES_ENDPOINT, options);
 
   const cachedData = getCachedValue(cacheKey);
@@ -284,6 +399,9 @@ export async function* getClasses(term?: string) {
       password: user.password,
       link: user.link,
       clsession: user.clsession,
+      cookies: user.psCookies,
+      code: user.code,
+      clMFA: user.clMFA,
     },
     options: options,
     session: session,
@@ -351,6 +469,10 @@ export function getSingleClass(
 
 export function getSchedule() {
   return fetchEndpoint(SCHEDULE_ENDPOINT, 'schedule');
+}
+
+export function getBellSchedule() {
+  return fetchEndpoint(BELL_SCHEDULE_ENDPOINT, 'bell schedule');
 }
 
 export function getTranscript() {

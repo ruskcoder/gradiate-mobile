@@ -109,7 +109,19 @@ export default function ToolDetailScreen() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 16, paddingHorizontal: 16 }}
         className="flex-1">
-        {type === 'whatif' && classData && <WhatIfContent classData={classData} />}
+        {type === 'whatif' && classData && (
+          classData.groups && typeof classData.groups === 'object' && Object.keys(classData.groups).length > 1 ? (
+            <View className="items-center gap-2 px-6 py-16">
+              <Text className="font-medium">What-If isn’t available for a full semester</Text>
+              <Text className="max-w-xs text-center text-sm text-muted-foreground">
+                A semester grade is an average of its terms, each graded separately. Pick a term or
+                progress period (e.g. {Object.keys(classData.groups)[0]}) to run What-If on it.
+              </Text>
+            </View>
+          ) : (
+            <WhatIfContent classData={classData} />
+          )
+        )}
         {type === 'impacts' && classData && <ImpactsContent classData={classData} history={history} />}
         {type === 'history' && <HistoryContent history={history} />}
         {type === 'timeline' && <TimelineContent history={history} />}

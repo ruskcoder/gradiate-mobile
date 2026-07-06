@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { getSingleClass } from '@/lib/grades-api';
-import { getLatestGradesLoad } from '@/lib/grades-store';
+import { getLatestGradesLoad, addGradesLoad } from '@/lib/grades-store';
 import { transformGroupsToCategories } from '@/lib/utils';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Calculator } from 'lucide-react-native';
@@ -20,6 +20,9 @@ interface ClassDetail {
   grade: number;
   categories: Record<string, CategoryCardData>;
   scores: AssignmentScore[];
+  // Present for a semester (Skyward SM1/SM2): the component terms, each graded
+  // on its own categories/assignments and weighted into the semester grade.
+  groups?: Record<string, any>;
 }
 
 /** Chunks category entries into columns of up to 2, stacked vertically within
@@ -88,14 +91,32 @@ export default function GradesDetailScreen() {
         const result = await getSingleClass(term, id, { subterm: subtermOption });
         if (cancelled) return;
         if (result.success && result.class) {
-          const transformed = transformGroupsToCategories(result.class);
+          const raw = result.class;
+          const groups = raw.groups && typeof raw.groups === 'object' ? raw.groups : undefined;
+          const isMultiGroup = groups && Object.keys(groups).length > 1;
+          const transformed = transformGroupsToCategories(raw);
           setDetail({
             courseName: transformed.name ?? name ?? '',
             id,
             grade: parseFloat(String(transformed.average ?? average ?? 0)),
             categories: transformed.categories ?? {},
             scores: transformed.scores ?? [],
+            groups: isMultiGroup ? groups : undefined,
           });
+          // Persist the fetched detail so history / "Load from Storage" have the
+          // scores for this class + term. Skip multi-group semesters: their flat
+          // categories would otherwise short-circuit the fast path and lose the
+          // per-term view on the next visit (they re-fetch instead, which is cheap).
+          if (!isMultiGroup) {
+            const label = subtermOption || term;
+            addGradesLoad(label, [{
+              course: id,
+              name: transformed.name ?? name ?? '',
+              average: transformed.average ?? average,
+              categories: transformed.categories ?? {},
+              scores: transformed.scores ?? [],
+            }]);
+          }
         }
       } catch (e: any) {
         if (!cancelled) setError(e.message ?? 'Failed to load class details');
@@ -156,32 +177,94 @@ export default function GradesDetailScreen() {
         <ScrollView
           contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16, gap: 20 }}
           className="flex-1">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: ROW_GAP }}>
-            <View
-              style={{ width: columnWidth }}
-              className="items-center justify-center rounded-lg border border-border bg-card p-1">
-              <GradeRing grade={detail.grade} size={132} />
-            </View>
-            {chunkCategories(detail.categories).map((column, idx) => (
-              <View key={idx} style={{ width: columnWidth }} className="justify-center gap-2">
-                {column.map(([name, data]) => (
-                  <CategoryCard key={name} name={name} data={data} />
-                ))}
+          {/* Semester overall ring — the average of the terms below. */}
+          {detail.groups ? (
+            <>
+              <View className="items-center gap-1">
+                <GradeRing grade={detail.grade} size={132} />
+                <Text className="text-sm text-muted-foreground">Semester average</Text>
               </View>
-            ))}
-          </ScrollView>
+              {Object.entries(detail.groups)
+                .sort(([a], [b]) => {
+                  const rank = (t: string) => {
+                    const m = /^(\d+)/.exec(t);
+                    if (m) return parseInt(m[1]);
+                    if (/^EX/i.test(t)) return 90 + (parseInt((/\d+/.exec(t) || [])[0] || '0') || 0);
+                    return 50;
+                  };
+                  return rank(a) - rank(b);
+                })
+                .map(([termName, group]: [string, any]) => {
+                const weight = parseFloat(group?.weight);
+                const termScores: AssignmentScore[] = Array.isArray(group?.scores) ? group.scores : [];
+                const termCats: Record<string, CategoryCardData> = group?.categories ?? {};
+                return (
+                  <View key={termName} className="gap-3 rounded-xl border border-border bg-card p-3">
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-row items-baseline gap-2">
+                        <Text className="text-lg font-semibold">{termName}</Text>
+                        {Number.isFinite(weight) && weight > 0 && (
+                          <Text className="text-xs text-muted-foreground">{weight}% of semester</Text>
+                        )}
+                      </View>
+                      {group?.grade !== undefined && group?.grade !== '' && (
+                        <Text className="text-lg font-semibold">{group.grade}</Text>
+                      )}
+                    </View>
+                    {Object.keys(termCats).length > 0 && (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: ROW_GAP }}>
+                        {chunkCategories(termCats).map((column, idx) => (
+                          <View key={idx} style={{ width: columnWidth }} className="justify-center gap-2">
+                            {column.map(([name, data]) => (
+                              <CategoryCard key={name} name={name} data={data} />
+                            ))}
+                          </View>
+                        ))}
+                      </ScrollView>
+                    )}
+                    {termScores.length > 0 ? (
+                      <View className="gap-2">
+                        {termScores.map((score, i) => (
+                          <AssignmentCard key={i} score={score} />
+                        ))}
+                      </View>
+                    ) : (
+                      <Text className="text-sm text-muted-foreground">No assignments recorded for this term.</Text>
+                    )}
+                  </View>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: ROW_GAP }}>
+                <View
+                  style={{ width: columnWidth }}
+                  className="items-center justify-center rounded-lg border border-border bg-card p-1">
+                  <GradeRing grade={detail.grade} size={132} />
+                </View>
+                {chunkCategories(detail.categories).map((column, idx) => (
+                  <View key={idx} style={{ width: columnWidth }} className="justify-center gap-2">
+                    {column.map(([name, data]) => (
+                      <CategoryCard key={name} name={name} data={data} />
+                    ))}
+                  </View>
+                ))}
+              </ScrollView>
 
-          <View className="gap-2">
-            <Text className="text-lg font-semibold">Assignments</Text>
-            <View className="gap-2">
-              {detail.scores.map((score, i) => (
-                <AssignmentCard key={i} score={score} />
-              ))}
-            </View>
-          </View>
+              <View className="gap-2">
+                <Text className="text-lg font-semibold">Assignments</Text>
+                <View className="gap-2">
+                  {detail.scores.map((score, i) => (
+                    <AssignmentCard key={i} score={score} />
+                  ))}
+                </View>
+              </View>
+            </>
+          )}
         </ScrollView>
       )}
     </View>

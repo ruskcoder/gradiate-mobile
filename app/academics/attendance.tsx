@@ -84,7 +84,7 @@ export default function AttendanceScreen() {
           {monthEvents.map(({ key, day, event }) => (
             <ListItem
               key={key}
-              squareColor={event.color}
+              squareColor={event.color || 'var(--primary)'}
               squareText={day}
               title={event.event}
               desc={event.periods.length > 0 ? event.periods.join(', ') : undefined}
