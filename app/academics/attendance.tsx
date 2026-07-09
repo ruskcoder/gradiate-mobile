@@ -37,6 +37,8 @@ export default function AttendanceScreen() {
   }, []);
 
   React.useEffect(() => {
+    // Fetches for the newly selected month; fetchForMonth sets loading state as the fetch begins.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchForMonth(month, year);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
@@ -84,7 +86,7 @@ export default function AttendanceScreen() {
           {monthEvents.map(({ key, day, event }) => (
             <ListItem
               key={key}
-              squareColor={event.color || 'var(--primary)'}
+              squareColor={event.color || undefined}
               squareText={day}
               title={event.event}
               desc={event.periods.length > 0 ? event.periods.join(', ') : undefined}

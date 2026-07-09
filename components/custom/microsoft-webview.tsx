@@ -62,8 +62,11 @@ export function MicrosoftWebView({
   const [capturing, setCapturing] = React.useState(false);
 
   React.useEffect(() => {
+    // Resets both the ref and the state together as one atomic transition when
+    // the modal opens; can't move to render since ref writes aren't allowed there either.
     if (visible) {
       captured.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCapturing(false);
     }
   }, [visible]);

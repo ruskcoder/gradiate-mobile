@@ -6,10 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { getSingleClass } from '@/lib/grades-api';
-import { getLatestGradesLoad, addGradesLoad } from '@/lib/grades-store';
+import { getLatestGradesLoad, addGradesLoad, reconstructClassDetailFromHistory, hasClassDetailInStorage } from '@/lib/grades-store';
 import { transformGroupsToCategories } from '@/lib/utils';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Calculator } from 'lucide-react-native';
+import { ArrowLeft, Calculator, HardDriveDownload } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,6 +53,35 @@ export default function GradesDetailScreen() {
   const [detail, setDetail] = React.useState<ClassDetail | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Lets "Load from Storage" abort the in-flight /single-class fetch so its late
+  // response can't overwrite the storage snapshot we just showed.
+  const cancelFetchRef = React.useRef<null | (() => void)>(null);
+
+  // The term/subterm label the stored detail is keyed under (deepest selected).
+  const storageLabel = params.subterm && params.subterm !== 'All' ? params.subterm : (params.term || '');
+
+  // Populate the detail from stored history instead of the network — the offline
+  // counterpart to the /single-class fetch. Also aborts any in-flight fetch, so
+  // it doubles as "stop the load in place and load from storage instead".
+  const loadDetailFromStorage = React.useCallback(() => {
+    const { id, name, average } = params;
+    if (!id || !storageLabel) return;
+    const stored = reconstructClassDetailFromHistory(storageLabel, id, name ?? '');
+    if (!stored) return;
+    cancelFetchRef.current?.();
+    setDetail({
+      courseName: name ?? '',
+      id,
+      grade: parseFloat(String(stored.average ?? average ?? 0)),
+      categories: stored.categories ?? {},
+      scores: stored.scores ?? [],
+    });
+    setError(null);
+    setLoading(false);
+  }, [params, storageLabel]);
+
+  const detailStorageAvailable = !!params.id &&
+    hasClassDetailInStorage(storageLabel, params.id, params.name ?? '');
 
   // The grade ring and each category column are sized to half the content
   // width so the ring + first column exactly fill the screen; the whole row
@@ -71,6 +100,9 @@ export default function GradesDetailScreen() {
     // there, so no extra request is needed.
     const stored = getLatestGradesLoad(term)?.classes.find((c: any) => c.course === id);
     if (stored?.categories) {
+      // This effect loads detail for the current id, falling through to an async
+      // fetch below when nothing is cached — both branches belong in one effect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDetail({
         courseName: stored.name ?? name ?? '',
         id,
@@ -83,6 +115,10 @@ export default function GradesDetailScreen() {
 
     // Otherwise ("terms" format), fetch full detail for this course.
     let cancelled = false;
+    cancelFetchRef.current = () => {
+      cancelled = true;
+      setLoading(false);
+    };
     (async () => {
       try {
         setLoading(true);
@@ -142,6 +178,8 @@ export default function GradesDetailScreen() {
           </Text>
           <Text className="text-sm text-muted-foreground">{params.id}</Text>
         </View>
+        {/* The "Load from Storage" control lives below the loading spinner
+            (mirroring the main grades page), not up here. */}
         <Pressable
           onPress={() =>
             router.push({
@@ -164,12 +202,26 @@ export default function GradesDetailScreen() {
         <View className="flex-1 items-center justify-center gap-3">
           <Spinner size="large" />
           <Text className="text-muted-foreground">Loading class details...</Text>
+          {/* Same affordance as the main grades page: stop the in-flight fetch
+              and show the last stored assignments instead. */}
+          {detailStorageAvailable && (
+            <Button variant="outline" size="sm" onPress={loadDetailFromStorage}>
+              <Icon as={HardDriveDownload} className="size-4" />
+              <Text>Load from Storage</Text>
+            </Button>
+          )}
         </View>
       )}
 
       {!loading && error && (
-        <View className="flex-1 items-center justify-center px-6">
+        <View className="flex-1 items-center justify-center gap-4 px-6">
           <Text className="text-center text-destructive">{error}</Text>
+          {detailStorageAvailable && (
+            <Button variant="outline" size="sm" onPress={loadDetailFromStorage}>
+              <Icon as={HardDriveDownload} className="size-4" />
+              <Text>Load from Storage</Text>
+            </Button>
+          )}
         </View>
       )}
 

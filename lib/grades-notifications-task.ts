@@ -1,6 +1,5 @@
-import { currentUser } from '@/lib/store';
+import { currentUser, hydrateSecureCredentials, useStore } from '@/lib/store';
 import { getClasses } from '@/lib/grades-api';
-import { getInitialTerm, getLatestGradesLoad } from '@/lib/grades-store';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 
@@ -19,58 +18,119 @@ function courseKey(course: string, name: string): string {
   return `${course}|${name}`;
 }
 
+/** A grade cell with no real value — never notify to or from one of these
+ *  (this is what produced "changed from 90 to undefined"). */
+function isBlankGrade(v: any): boolean {
+  return (
+    v === undefined ||
+    v === null ||
+    v === '' ||
+    (typeof v === 'number' && isNaN(v)) ||
+    (typeof v === 'string' && (v.trim() === '' || isNaN(parseFloat(v))))
+  );
+}
+
 /**
- * Fetches the current term's classes, diffs each class's average against the
- * last stored snapshot for that term, and fires one notification per class
- * whose grade changed. `getClasses` already writes the fresh data back into
- * the grades store as a side effect, so no separate persistence step is
- * needed here.
+ * Fetches the freshest classes and diffs each class's average — for EVERY term
+ * that's currently active — against the last stored snapshot of that term,
+ * firing one notification per (class, term) whose grade changed.
+ *
+ * The API reports `currentTerms`: the set of columns whose window contains today
+ * (e.g. a progress period P1, its cycle C1, and the semester S1 all at once),
+ * finest last. We diff each of them so a change that only moves a semester or
+ * cycle average still notifies, and we tag the term when more than one is active.
+ * Blank cells are skipped on BOTH sides so a class that simply isn't graded in a
+ * term never produces an "…to undefined" message.
+ *
+ * The previous averages are snapshotted BEFORE the fetch, because `getClasses`
+ * writes the fresh data straight back into the store as a side effect.
  */
 export async function checkGradesAndNotify(): Promise<boolean> {
+  // This runs in the background JS context, where the store rehydrates from
+  // AsyncStorage but the password + 2FA answer live in the OS keystore (stripped
+  // from the persisted blob). Wait for both before fetching, or the request goes
+  // out with no password ("username and password are required for credentials
+  // login"). Foreground calls just no-op through here (already hydrated).
+  if (!useStore.persist.hasHydrated()) {
+    await new Promise<void>((resolve) => {
+      const unsub = useStore.persist.onFinishHydration(() => {
+        unsub?.();
+        resolve();
+      });
+      if (useStore.persist.hasHydrated()) resolve();
+    });
+  }
+  await hydrateSecureCredentials();
+
   const user = currentUser();
   if (!user || !user.notificationsEnabled) {
     return false;
   }
-
-  const term = getInitialTerm();
-  if (!term) {
+  // Nothing to fetch with if credentials never made it back from the keystore.
+  if (user.loginType === 'credentials' && (!user.username || !user.password)) {
     return false;
   }
 
-  const previousLoad = getLatestGradesLoad(term);
-  const previousAverages = new Map<string, any>();
-  for (const course of previousLoad?.classes ?? []) {
-    previousAverages.set(courseKey(course.course, course.name), course.average);
-  }
+  // Snapshot prior per-term averages up front. `history` is keyed
+  // term -> courseKey -> [snapshots]; the last snapshot is the previous value.
+  const historyBefore: any = useStore.getState().getGradesStore().history || {};
+  const prevAverage = (term: string, key: string) => {
+    const snaps = historyBefore?.[term]?.[key];
+    return Array.isArray(snaps) && snaps.length ? snaps[snaps.length - 1].average : undefined;
+  };
 
-  let newClasses: Array<{ course: string; name: string; average?: any }> | null = null;
-  for await (const chunk of getClasses(term)) {
-    if (chunk?.success === true) {
-      newClasses = chunk.classes;
-    }
-  }
+  // Don't notify off a stale cached snapshot — force a live fetch.
+  useStore.getState().clearCache();
 
-  if (!newClasses) {
+  let chunk: any = null;
+  for await (const c of getClasses()) {
+    if (c?.success === true) chunk = c;
+  }
+  if (!chunk || !Array.isArray(chunk.classes)) {
     return false;
   }
+
+  // Every currently-active term, finest last. Portals that don't send the set
+  // (e.g. HAC) fall back to their single current term.
+  const currentTerms: string[] =
+    Array.isArray(chunk.currentTerms) && chunk.currentTerms.length
+      ? chunk.currentTerms
+      : chunk.term
+        ? [chunk.term]
+        : [];
+  if (currentTerms.length === 0) {
+    return false;
+  }
+  const multi = currentTerms.length > 1;
 
   let changed = false;
-  for (const course of newClasses) {
-    const key = courseKey(course.course, course.name);
-    if (!previousAverages.has(key)) continue;
+  for (const term of currentTerms) {
+    for (const course of chunk.classes) {
+      const key = courseKey(course.course, course.name);
+      // "terms" format carries a per-term `averages` map; single-term formats
+      // (HAC / detail) carry a flat `average` for the one term they represent.
+      const newAverage =
+        course.averages && typeof course.averages === 'object'
+          ? course.averages[term]
+          : term === chunk.term
+            ? course.average
+            : undefined;
+      const oldAverage = prevAverage(term, key);
 
-    const oldAverage = previousAverages.get(key);
-    if (JSON.stringify(oldAverage) === JSON.stringify(course.average)) continue;
-    if (oldAverage === undefined || oldAverage === null) continue;
+      if (isBlankGrade(oldAverage) || isBlankGrade(newAverage)) continue;
+      if (String(oldAverage) === String(newAverage)) continue;
 
-    changed = true;
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Grade updated',
-        body: `Your grade for ${course.name} changed from a ${oldAverage} to ${course.average}.`,
-      },
-      trigger: null,
-    });
+      changed = true;
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Grade updated',
+          body: multi
+            ? `${course.name} (${term}) changed from ${oldAverage} to ${newAverage}.`
+            : `Your grade for ${course.name} changed from ${oldAverage} to ${newAverage}.`,
+        },
+        trigger: null,
+      });
+    }
   }
 
   return changed;

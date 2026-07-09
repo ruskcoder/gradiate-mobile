@@ -3,7 +3,6 @@ import { Platform, TextInput, useColorScheme } from 'react-native';
 
 function Input({
   className,
-  placeholderClassName,
   ...props
 }: React.ComponentProps<typeof TextInput> & React.RefAttributes<TextInput>) {
   const colorScheme = useColorScheme();

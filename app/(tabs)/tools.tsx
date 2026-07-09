@@ -107,18 +107,21 @@ export default function CalculatorsScreen() {
               <>
                 <ListItem
                   squareText={<Icon as={GraduationCap} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+                  squareColor=""
                   title="GPA Calculator"
                   desc="Predict your GPA"
                   onPress={() => router.push('/calculators/gpa' as any)}
                 />
                 <ListItem
                   squareText={<Icon as={ListOrdered} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+                  squareColor=""
                   title="Rank Calculator"
                   desc="Predict your class rank"
                   onPress={() => router.push('/calculators/rank' as any)}
                 />
                 <ListItem
                   squareText={<Icon as={PencilRuler} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+                  squareColor=""
                   title="Final Exam Calculator"
                   desc="Figure out what you need on your final"
                   onPress={() => router.push('/calculators/final-exam' as any)}
@@ -127,6 +130,7 @@ export default function CalculatorsScreen() {
             )}
             <ListItem
               squareText={<Icon as={Calculator} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title="What If Calculator"
               desc="See how grades affect your average"
               onPress={() => openTool('whatif')}
@@ -140,24 +144,28 @@ export default function CalculatorsScreen() {
           <ListItemsList>
             <ListItem
               squareText={<Icon as={TrendingUp} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title="Impacts"
               desc="See how each assignment affects your grade"
               onPress={() => openTool('impacts')}
             />
             <ListItem
               squareText={<Icon as={Clock} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title="History"
               desc="View grade history over time"
               onPress={() => openTool('history')}
             />
             <ListItem
               squareText={<Icon as={Timeline} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title="Timeline"
               desc="See all grade changes in timeline view"
               onPress={() => openTool('timeline')}
             />
             <ListItem
               squareText={<Icon as={Zap} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title="TimeTravel"
               desc="View grades from any point in history"
               onPress={() => openTool('timetravel')}

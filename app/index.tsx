@@ -7,15 +7,11 @@ import * as React from 'react';
 // bounces to /login — which is why a logged-in user kept being asked to log in
 // on every cold start. Wait for hydration, then route by the persisted user.
 export default function Index() {
-  const [hydrated, setHydrated] = React.useState(() => useStore.persist.hasHydrated());
-
-  React.useEffect(() => {
-    if (hydrated) return;
-    const unsub = useStore.persist.onFinishHydration(() => setHydrated(true));
-    // Guard against hydration completing between the initial render and here.
-    if (useStore.persist.hasHydrated()) setHydrated(true);
-    return unsub;
-  }, [hydrated]);
+  const hydrated = React.useSyncExternalStore(
+    useStore.persist.onFinishHydration,
+    () => useStore.persist.hasHydrated(),
+    () => false // server snapshot: storage never hydrates during static web export
+  );
 
   if (!hydrated) return null;
 

@@ -79,13 +79,14 @@ export default function ReportCardScreen() {
     selectedReportCard?.report?.some((row) => row[col] !== undefined && row[col] !== '')
   );
 
+  const displayColumnsKey = displayColumns.join(',');
   const filteredRows = React.useMemo(() => {
     if (!selectedReportCard?.report?.length) return [];
     return selectedReportCard.report.filter((row) =>
       displayColumns.some((col) => row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '')
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReportCard, displayColumns.join(',')]);
+  }, [selectedReportCard, displayColumnsKey]);
 
   const columns: SimpleTableColumn[] = displayColumns.map((col) => ({
     key: col,

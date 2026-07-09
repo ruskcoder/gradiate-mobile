@@ -7,7 +7,7 @@ export function useColorScheme() {
   const isDarkColorScheme = colorScheme === 'dark';
 
   const setColorScheme = useCallback((scheme: 'light' | 'dark' | 'system') => {
-    Appearance.setColorScheme(scheme === 'system' ? null : scheme);
+    Appearance.setColorScheme(scheme === 'system' ? 'unspecified' : scheme);
   }, []);
 
   return { colorScheme, isDarkColorScheme, setColorScheme };

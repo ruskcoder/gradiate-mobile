@@ -24,9 +24,19 @@ import { pathMerge } from '@/lib/utils';
 type Platform = (typeof PLATFORMS)[number];
 type LoginType = (typeof LOGIN_TYPES)[number];
 
+/** Identity of the signed-in account, so cached responses never leak across a
+ *  sign-out / sign-in into a different account (the cache is a single global
+ *  map, not per-user). Without this, re-logging into another account showed the
+ *  previous account's grades until a manual refresh. */
+function userScope(): string {
+  const u = currentUser();
+  if (!u) return 'anon';
+  return `${u.platform}|${u.link}|${u.username}|${u.studentId || ''}`;
+}
+
 function generateCacheKey(endpoint: string, options: Record<string, any> = {}): string {
   const optionsStr = Object.keys(options).length > 0 ? JSON.stringify(options) : 'no-options';
-  return `${endpoint}:${optionsStr}`;
+  return `${userScope()}::${endpoint}:${optionsStr}`;
 }
 
 function getCachedValue(key: string): any {
@@ -418,7 +428,11 @@ export async function* getClasses(term?: string) {
       if (term) {
         addGradesLoad(term, data.classes);
       } else {
-        initializeGradesStore(data.term, data.termList, data.term, data.classes);
+        initializeGradesStore(data.term, data.termList, data.term, data.classes, {
+          termTree: data.termTree,
+          currentTerms: data.currentTerms,
+          hasSubterms: data.hasSubterms,
+        });
       }
     }
     return data;

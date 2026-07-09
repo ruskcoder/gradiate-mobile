@@ -101,11 +101,23 @@ export interface User {
   gradesStore: {
     initialTerm: string;
     termList: string[];
+    // The cascading term hierarchy, persisted so "Load from Storage" can rebuild
+    // the same nested subtabs offline instead of collapsing to a flat term row.
+    termTree: any[];
+    currentTerms: string[];
+    hasSubterms: boolean;
     history: Record<
       string,
       Record<string, Array<{ loadedAt: number; average: any; categories: any; scores: any[] }>>
     >;
   };
+}
+
+/** Metadata describing the term hierarchy for a grades payload. */
+export interface GradesTermMeta {
+  termTree?: any[];
+  currentTerms?: string[];
+  hasSubterms?: boolean;
 }
 
 type GradesHistory = User['gradesStore']['history'];
@@ -232,6 +244,9 @@ const DEFAULT_USER: User = {
   gradesStore: {
     initialTerm: '',
     termList: [],
+    termTree: [],
+    currentTerms: [],
+    hasSubterms: false,
     history: {},
   },
 };
@@ -267,12 +282,15 @@ interface UserStore {
   addShortcut: (shortcut: Omit<Shortcut, 'id'>) => void;
   updateShortcut: (id: string, updates: Partial<Shortcut>) => void;
   removeShortcut: (id: string) => void;
-  addGradesStore: (initialTerm: string, termList: string[], term: string, classes: any[]) => void;
+  addGradesStore: (initialTerm: string, termList: string[], term: string, classes: any[], meta?: GradesTermMeta) => void;
   addGradesStoreLoad: (term: string, classes: any[]) => void;
   updateLatestGradesLoadTime: (term: string) => void;
   getGradesStore: () => {
     initialTerm: string;
     termList: string[];
+    termTree: any[];
+    currentTerms: string[];
+    hasSubterms: boolean;
     history: Record<string, Array<{ loadedAt: number; classes: any[] }>>;
   };
   clearGradesStore: () => void;
@@ -350,6 +368,13 @@ export const useStore = create<UserStore>()(
           return {
             users: newUsers,
             currentUserIndex: newIndex,
+            // The API session cookies and the response cache are global, not
+            // per-user. Drop them on sign-out so a subsequent sign-in (into a
+            // different account, without an app restart) can't ride the previous
+            // account's session or read its cached grades.
+            session: {},
+            cache: {},
+            cacheTimestamp: null,
           };
         });
       },
@@ -500,18 +525,25 @@ export const useStore = create<UserStore>()(
         initialTerm: string,
         termList: string[],
         term: string,
-        classes: any[]
+        classes: any[],
+        meta?: GradesTermMeta
       ) => {
         set((state) => {
           const newUsers = [...state.users];
           const currentUser = newUsers[state.currentUserIndex];
           if (currentUser) {
+            const prev = currentUser.gradesStore;
             newUsers[state.currentUserIndex] = {
               ...currentUser,
               gradesStore: {
                 initialTerm,
                 termList,
-                history: mergeClassesIntoHistory(currentUser.gradesStore.history, term, classes),
+                // Persist the cascade (fall back to previous values when a payload
+                // omits them) so storage keeps the nested subtabs.
+                termTree: meta?.termTree ?? prev.termTree ?? [],
+                currentTerms: meta?.currentTerms ?? prev.currentTerms ?? [],
+                hasSubterms: meta?.hasSubterms ?? prev.hasSubterms ?? false,
+                history: mergeClassesIntoHistory(prev.history, term, classes),
               },
             } as User;
           }
@@ -573,25 +605,28 @@ export const useStore = create<UserStore>()(
       },
 
       getGradesStore: () => {
+        const empty = {
+          initialTerm: '',
+          termList: [] as string[],
+          termTree: [] as any[],
+          currentTerms: [] as string[],
+          hasSubterms: false,
+          history: {} as Record<string, Array<{ loadedAt: number; classes: any[] }>>,
+        };
         const { users, currentUserIndex } = get();
         if (users.length === 0 || currentUserIndex < 0 || currentUserIndex >= users.length) {
-          return {
-            initialTerm: '',
-            termList: [],
-            history: {} as Record<string, Array<{ loadedAt: number; classes: any[] }>>,
-          };
+          return empty;
         }
         const store = users[currentUserIndex]?.gradesStore;
         if (!store) {
-          return {
-            initialTerm: '',
-            termList: [],
-            history: {} as Record<string, Array<{ loadedAt: number; classes: any[] }>>,
-          };
+          return empty;
         }
         return {
           initialTerm: store.initialTerm,
           termList: store.termList,
+          termTree: store.termTree ?? [],
+          currentTerms: store.currentTerms ?? [],
+          hasSubterms: store.hasSubterms ?? false,
           history: store.history as unknown as Record<
             string,
             Array<{ loadedAt: number; classes: any[] }>
@@ -609,6 +644,9 @@ export const useStore = create<UserStore>()(
               gradesStore: {
                 initialTerm: '',
                 termList: [],
+                termTree: [],
+                currentTerms: [],
+                hasSubterms: false,
                 history: {},
               },
             } as User;

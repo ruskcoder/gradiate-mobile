@@ -3,7 +3,7 @@ import { Text } from '@/components/ui/text';
 import { useAppSettings } from '@/lib/app-settings';
 import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { BlurView } from 'expo-blur';
 import type { LucideIcon } from 'lucide-react-native';
 import { Calculator, GraduationCap, LibraryBig, Settings as SettingsIcon } from 'lucide-react-native';

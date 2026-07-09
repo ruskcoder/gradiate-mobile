@@ -45,9 +45,12 @@ export function MfaPrompt({
   const [pin, setPin] = React.useState('');
 
   // Clear the PIN whenever the prompt (re)opens so a stale value never lingers.
-  React.useEffect(() => {
+  const resetKey = open ? mfaType : null;
+  const [prevResetKey, setPrevResetKey] = React.useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
     if (open) setPin('');
-  }, [open, mfaType]);
+  }
 
   const canSubmitPin = !loading && pin.length >= 4;
 

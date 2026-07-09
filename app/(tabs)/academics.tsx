@@ -82,6 +82,7 @@ export default function AcademicsScreen() {
             <ListItem
               key={page.href}
               squareText={<Icon as={page.icon} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+              squareColor=""
               title={page.title}
               desc={page.desc}
               onPress={() => router.push(page.href as any)}

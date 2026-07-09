@@ -1,3 +1,8 @@
+// Mutating `.value` on a Reanimated shared value is the library's documented
+// API for updating it from gesture worklets. These worklets run on the UI
+// thread, outside React's render/compiler model, so the lint rule below
+// (aimed at catching mutation of plain React state/refs) doesn't apply here.
+/* eslint-disable react-hooks/immutability */
 import { LIST_REVEAL_DURATION_MS, LIST_REVEAL_STAGGER_MS } from '@/lib/constants';
 import * as Haptics from 'expo-haptics';
 import * as React from 'react';
@@ -30,6 +35,13 @@ interface ReorderableListProps<T> {
    * mostly faded, so the two motions read as one handoff instead of overlapping.
    */
   revealDelayMs?: number;
+  /**
+   * Bump this to REPLAY the staggered fade-up on already-mounted rows — e.g. when
+   * the grades page switches to a different term/subterm column (the same course
+   * rows stay mounted, so nothing remounts to retrigger the mount reveal). Mirrors
+   * the web app replaying its list cascade on every tab level change.
+   */
+  revealNonce?: number | string;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -60,6 +72,7 @@ interface RowProps<T> {
   rowStride: number;
   animateReveal: boolean;
   revealDelayMs: number;
+  revealNonce: number | string;
   renderItem: (item: T, isDragging: boolean) => React.ReactNode;
   onMove: (from: number, to: number) => void;
   onDrop: () => void;
@@ -77,6 +90,7 @@ function ReorderableRow<T>({
   rowStride,
   animateReveal,
   revealDelayMs,
+  revealNonce,
   renderItem,
   onMove,
   onDrop,
@@ -112,6 +126,22 @@ function ReorderableRow<T>({
       : 1;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Replay the fade-up cascade when the caller bumps `revealNonce` (a term/subterm
+  // switch). Skips the very first run — that equals the mount value, and the mount
+  // effect above already played (or skipped) the initial reveal — so this only
+  // fires on genuine subsequent switches, never doubling up with the mount reveal.
+  const lastNonceRef = React.useRef(revealNonce);
+  React.useEffect(() => {
+    if (revealNonce === lastNonceRef.current) return;
+    lastNonceRef.current = revealNonce;
+    reveal.value = 0;
+    reveal.value = withDelay(
+      index * LIST_REVEAL_STAGGER_MS,
+      withTiming(1, { duration: LIST_REVEAL_DURATION_MS })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealNonce]);
 
   // Keep the resting position in sync when the index (reorder / load) or the
   // measured column geometry changes.
@@ -222,10 +252,13 @@ export function ReorderableList<T>({
   columnGap = 8,
   animateReveal = false,
   revealDelayMs = 0,
+  revealNonce = 0,
 }: ReorderableListProps<T>) {
   const [order, setOrder] = React.useState(items);
   const orderRef = React.useRef(order);
-  orderRef.current = order;
+  React.useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
 
   // The column width is derived from the measured container width so a grid
   // lays out correctly at any screen size. A single-column list just fills the
@@ -304,6 +337,7 @@ export function ReorderableList<T>({
             rowStride={rowStride}
             animateReveal={animateReveal}
             revealDelayMs={revealDelayMs}
+            revealNonce={revealNonce}
             renderItem={renderItem}
             onMove={handleMove}
             onDrop={handleDrop}

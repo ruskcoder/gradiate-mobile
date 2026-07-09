@@ -7,7 +7,7 @@ import { subscribeForPush } from '@/lib/push-subscribe';
 import { useCurrentUser, useStore } from '@/lib/store';
 import { NAV_THEME } from '@/lib/theme';
 import { useColorScheme } from '@/lib/useColorScheme';
-import { ThemeProvider } from '@react-navigation/native';
+import { ThemeProvider } from 'expo-router/react-navigation';
 import { PortalHost } from '@rn-primitives/portal';
 import * as SystemUI from 'expo-system-ui';
 import { Stack, usePathname, useRouter } from 'expo-router';

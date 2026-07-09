@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, type Theme } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, type Theme } from 'expo-router/react-navigation';
 
 // Mirrors gradexis-web/src/theme.css (:root / .dark) so navigation chrome
 // (status bar / stack background, etc.) matches the app's actual default

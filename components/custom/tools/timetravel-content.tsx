@@ -20,9 +20,11 @@ export function TimeTravelContent({ history }: { history: CourseHistoryEntry[] }
 
   const [sliderValue, setSliderValue] = React.useState(Math.max(0, history.length - 1));
 
-  React.useEffect(() => {
+  const [prevHistory, setPrevHistory] = React.useState(history);
+  if (history !== prevHistory) {
+    setPrevHistory(history);
     setSliderValue(Math.max(0, history.length - 1));
-  }, [history]);
+  }
 
   const displayedGrade = history[sliderValue] ?? null;
 

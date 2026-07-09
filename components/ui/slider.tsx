@@ -1,3 +1,8 @@
+// Mutating `.value` on a Reanimated shared value is the library's documented
+// API for updating it from gesture worklets. These worklets run on the UI
+// thread, outside React's render/compiler model, so the lint rule below
+// (aimed at catching mutation of plain React state/refs) doesn't apply here.
+/* eslint-disable react-hooks/immutability */
 import { cn } from '@/lib/utils';
 import * as Haptics from 'expo-haptics';
 import * as React from 'react';

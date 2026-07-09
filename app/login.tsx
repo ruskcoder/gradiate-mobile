@@ -7,9 +7,11 @@ import { Text } from '@/components/ui/text';
 import {
   CLASSLINK_LAUNCHPAD_BASE,
   classlinkCodeFromLink,
+  parseLoginMethods,
   PLATFORM_MAPPING,
   PLATFORMS,
   type District,
+  type LoginTitles,
 } from '@/lib/constants';
 import { fetchAuthMethods, fetchDistrictDetails, login } from '@/lib/grades-api';
 import { useStore } from '@/lib/store';
@@ -19,10 +21,11 @@ import { BlurView } from 'expo-blur';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { GraduationCap, KeyRound, Link2, School } from 'lucide-react-native';
+import { KeyRound } from 'lucide-react-native';
 import * as React from 'react';
 import {
   FlatList,
+  Image,
   ImageBackground,
   KeyboardAvoidingView,
   Platform,
@@ -59,10 +62,13 @@ const WHITE_BUTTON = {
   borderColor: 'rgba(0,0,0,0.12)',
 };
 
-const PLATFORM_ICONS: Record<string, typeof School> = {
-  hac: School,
-  'skyward-legacy': GraduationCap,
+const PLATFORM_LOGOS: Record<string, ReturnType<typeof require>> = {
+  hac: require('@/assets/images/hac.png'),
+  'skyward-legacy': require('@/assets/images/skyward.png'),
+  powerschool: require('@/assets/images/powerschool.png'),
 };
+const CLASSLINK_LOGO = require('@/assets/images/classlink.png');
+const MICROSOFT_LOGO = require('@/assets/images/microsoft.png');
 
 function Logo() {
   return (
@@ -75,6 +81,10 @@ function Logo() {
       <Text className="text-4xl font-extrabold tracking-tight text-black">Gradexis</Text>
     </View>
   );
+}
+
+function MicrosoftLogo() {
+  return <Image source={MICROSOFT_LOGO} style={{ width: 18, height: 18 }} resizeMode="contain" />;
 }
 
 /** A lightweight text field styled to mirror the web's shadcn Input. */
@@ -123,13 +133,16 @@ function DistrictRow({ district, onPress }: { district: District; onPress?: () =
   );
 }
 
-/** A square, selectable card used by the Custom flow's platform/source grids. */
+/** A square, selectable card used by the Custom flow's platform/source grids.
+ *  Takes either a lucide `icon` or an image `logo` — never both. */
 function ChoiceCard({
   icon,
+  logo,
   label,
   onPress,
 }: {
-  icon: typeof School;
+  icon?: typeof KeyRound;
+  logo?: ReturnType<typeof require>;
   label: string;
   onPress: () => void;
 }) {
@@ -137,7 +150,11 @@ function ChoiceCard({
     <Pressable
       onPress={onPress}
       className="aspect-square flex-1 items-center justify-center gap-2 rounded-xl border border-black/15 bg-white/60 p-3 active:bg-white/90">
-      <Icon as={icon} className="text-black" size={30} />
+      {logo ? (
+        <Image source={logo} style={{ width: 40, height: 40 }} resizeMode="contain" />
+      ) : (
+        icon && <Icon as={icon} className="text-black" size={30} />
+      )}
       <Text className="text-center text-sm font-medium text-black" numberOfLines={2}>
         {label}
       </Text>
@@ -217,11 +234,24 @@ export default function LoginScreen() {
 
   // Which sign-in methods the selected district's portal offers. Defaults to
   // credentials-only; refreshed from /authMethods when a district is chosen.
-  const [authInfo, setAuthInfo] = React.useState<{ credentials: boolean; microsoft: boolean; ssoUrl: string | null }>({
-    credentials: true,
-    microsoft: false,
-    ssoUrl: null,
-  });
+  // Seed the offered methods from the account being re-authenticated so a
+  // ClassLink or Microsoft re-auth shows the right form immediately (a fresh
+  // start has no reauthDistrict → credentials-only default).
+  const [authInfo, setAuthInfo] = React.useState<{ credentials: boolean; microsoft: boolean; classlink: boolean; ssoUrl: string | null }>(
+    () => {
+      const lt = reauthDistrict?.loginType;
+      return {
+        credentials: lt !== 'classlinkCredentials' && lt !== 'microsoftSession',
+        microsoft: lt === 'microsoftSession',
+        classlink: lt === 'classlinkCredentials',
+        ssoUrl: null,
+      };
+    }
+  );
+  // Optional per-method section titles a district declares (PowerSchool
+  // parent-vs-student, e.g. credentials = "Parent Login", microsoft = "Student
+  // Login").
+  const [loginTitles, setLoginTitles] = React.useState<LoginTitles>({});
   const [msOpen, setMsOpen] = React.useState(false);
   const [msSilent, setMsSilent] = React.useState(false);
 
@@ -254,7 +284,7 @@ export default function LoginScreen() {
 
   React.useEffect(() => {
     if (Platform.OS !== 'android') return;
-    NavigationBar.setButtonStyleAsync('dark');
+    NavigationBar.setStyle('dark');
   }, []);
 
   // --- Animated card height (adapts to the active step) ----------------------
@@ -283,27 +313,50 @@ export default function LoginScreen() {
   const selectDistrict = (d: District) => {
     const plat = (d.platform as (typeof PLATFORMS)[number]) || 'hac';
     setPlatform(plat);
-    const lt = (d.loginType as LoginType) || 'credentials';
+    // The list already declares the offered methods in the slash `loginType`, so
+    // derive the sign-in buttons straight from it — no `/authMethods` probe. Base
+    // the credential flow on credentials when offered, else ClassLink.
+    const methods = parseLoginMethods(d.loginType);
+    const lt: LoginType = methods.credentials
+      ? 'credentials'
+      : methods.classlink
+        ? 'classlinkCredentials'
+        : 'credentials';
     setLoginType(lt);
     setDistrictName(d.name);
     setLink(d.link);
-    setCode(lt === 'classlinkCredentials' ? classlinkCodeFromLink(d.link) : '');
+    // Prefill the ClassLink code from the loginType's inline "classlink:<code>"
+    // when declared, else derive it from the launchpad link.
+    setCode(methods.classlink ? methods.classlinkCode || classlinkCodeFromLink(d.link) : '');
     setFromCustom(false);
     setDetailsFetched(true); // list districts are already resolved
     setDistrictOptions([]);
     setUsername('');
     setPassword('');
     setError(null);
-    // Default to credentials; PowerSchool districts may also (or only) offer
-    // Microsoft SSO, so ask the API which buttons to show.
-    setAuthInfo({ credentials: true, microsoft: false, ssoUrl: null });
-    if (plat === 'powerschool') {
-      fetchAuthMethods(plat, d.link)
-        .then(setAuthInfo)
-        .catch(() => setAuthInfo({ credentials: true, microsoft: false, ssoUrl: null }));
-    }
+    setAuthInfo({
+      credentials: methods.credentials,
+      microsoft: methods.microsoft,
+      classlink: methods.classlink,
+      ssoUrl: null,
+    });
+    setLoginTitles(d.loginTitles ?? {});
     go('form');
     setTimeout(() => setSearch(''), STEP_DURATION);
+  };
+
+  // Switch the active credential form between the offered methods (fixing the
+  // old one-way behaviour where the switch button vanished with no way back).
+  // Microsoft isn't a credential form mode — it's its own action button — so only
+  // credentials ↔ ClassLink swap here.
+  const switchMethod = (method: 'credentials' | 'classlink') => {
+    setError(null);
+    if (method === 'classlink') {
+      setLoginType('classlinkCredentials');
+      setCode((c) => c || classlinkCodeFromLink(link) || '');
+    } else {
+      setLoginType('credentials');
+    }
   };
 
   const pickPlatform = (p: (typeof PLATFORMS)[number]) => {
@@ -323,6 +376,13 @@ export default function LoginScreen() {
     setDetailsFetched(false);
     setDistrictOptions([]);
     setError(null);
+    setAuthInfo({
+      credentials: source === 'credentials',
+      microsoft: false,
+      classlink: source === 'classlink',
+      ssoUrl: null,
+    });
+    setLoginTitles({});
     go('form');
   };
 
@@ -330,9 +390,25 @@ export default function LoginScreen() {
     if (!link.trim()) return;
     setFetching(true);
     setError(null);
-    const res = await fetchDistrictDetails(platform, link.trim());
+    // A Custom link is undeclared, so this is exactly where we DO probe: discover
+    // both the multi-district picker (HAC) and the offered sign-in methods
+    // (credentials / Microsoft, e.g. for a PowerSchool portal) in parallel.
+    const [res, methods] = await Promise.all([
+      fetchDistrictDetails(platform, link.trim()),
+      fetchAuthMethods(platform, link.trim()),
+    ]);
     setDistrictOptions(res.districts);
     if (res.multiple && res.districts[0]) setDistrictName(res.districts[0].name);
+    setAuthInfo({
+      credentials: methods.credentials,
+      microsoft: methods.microsoft,
+      classlink: false,
+      ssoUrl: methods.ssoUrl,
+    });
+    setLoginTitles({});
+    // A Microsoft-only portal has no credentials form — keep the active mode off
+    // ClassLink so the Microsoft (student) button is what shows.
+    if (!methods.credentials && methods.microsoft) setLoginType('credentials');
     setDetailsFetched(true);
     setFetching(false);
   };
@@ -427,7 +503,7 @@ export default function LoginScreen() {
   React.useEffect(() => {
     if (reauthActive && reauthDistrict?.loginType === 'microsoftSession' && !msReauthTriggered.current) {
       msReauthTriggered.current = true;
-      setAuthInfo({ credentials: false, microsoft: true, ssoUrl: null });
+      setAuthInfo({ credentials: false, microsoft: true, classlink: false, ssoUrl: null });
       setMsSilent(true);
       setMsOpen(true);
     }
@@ -503,6 +579,20 @@ export default function LoginScreen() {
   // "fetch details" step; every other path shows credentials immediately.
   const needsFetch = fromCustom && loginType === 'credentials';
   const showCredentials = !needsFetch || detailsFetched;
+  // The active credential mode actually has a username/password form. Both plain
+  // credentials and ClassLink use one; a Microsoft-only portal has neither.
+  const hasCredForm = isClassLink ? authInfo.classlink : authInfo.credentials;
+  const showCredForm = showCredentials && hasCredForm;
+  // Section titles. PowerSchool distinguishes a parent credentials login from a
+  // student Microsoft login; a district can name them via `loginTitles`, and we
+  // fall back to "Parent Login"/"Student Login" for any PowerSchool portal that
+  // offers both (so the Custom flow gets the distinction too).
+  const psParentStudent = platform === 'powerschool' && authInfo.microsoft;
+  const credTitle =
+    loginTitles.credentials || (psParentStudent && authInfo.credentials ? 'Parent Login' : undefined);
+  const classlinkTitle = loginTitles.classlink;
+  const microsoftTitle = loginTitles.microsoft || (platform === 'powerschool' ? 'Student Login' : undefined);
+  const activeTitle = isClassLink ? classlinkTitle : credTitle;
   const canSubmit =
     !loading && username.length > 0 && password.length > 0 && (isClassLink ? !!code || !!link : true);
 
@@ -608,14 +698,17 @@ export default function LoginScreen() {
   const renderCustomPlatform = () => (
     <View className="gap-3">
       <Text className="text-center text-sm font-medium text-black">Choose your platform</Text>
-      <View className="flex-row gap-3">
+      {/* Two per row (not three) so the tiles stay comfortably large; a trailing
+          odd tile keeps its half-width rather than stretching full-width. */}
+      <View className="flex-row flex-wrap gap-3">
         {PLATFORMS.map((p) => (
-          <ChoiceCard
-            key={p}
-            icon={PLATFORM_ICONS[p] ?? School}
-            label={PLATFORM_MAPPING[p] ?? p}
-            onPress={() => pickPlatform(p)}
-          />
+          <View key={p} style={{ width: '47%' }}>
+            <ChoiceCard
+              logo={PLATFORM_LOGOS[p]}
+              label={PLATFORM_MAPPING[p] ?? p}
+              onPress={() => pickPlatform(p)}
+            />
+          </View>
         ))}
       </View>
       <Button variant="outline" className="w-full" style={WHITE_BUTTON} onPress={back}>
@@ -629,7 +722,7 @@ export default function LoginScreen() {
       <Text className="text-center text-sm font-medium text-black">Choose your login source</Text>
       <View className="flex-row gap-3">
         <ChoiceCard icon={KeyRound} label="Credentials" onPress={() => pickSource('credentials')} />
-        <ChoiceCard icon={Link2} label="ClassLink" onPress={() => pickSource('classlink')} />
+        <ChoiceCard logo={CLASSLINK_LOGO} label="ClassLink" onPress={() => pickSource('classlink')} />
       </View>
       <Button variant="outline" className="w-full" style={WHITE_BUTTON} onPress={back}>
         <Text className="text-black">Back</Text>
@@ -640,7 +733,17 @@ export default function LoginScreen() {
   const renderForm = () => (
     <View className="gap-4">
       {!fromCustom && districtName ? (
-        <DistrictRow district={{ name: districtName, platform, link, loginType }} />
+        <DistrictRow
+          district={{
+            name: districtName,
+            platform,
+            // A district picked from the list already has its ClassLink code
+            // resolved, so show the launchpad URL it'll actually sign in
+            // through instead of the portal link.
+            link: isClassLink ? `${CLASSLINK_LAUNCHPAD_BASE}${code}` : link,
+            loginType,
+          }}
+        />
       ) : (
         <View className="rounded-lg border border-black/15 bg-white/50 p-3">
           <Text className="text-base font-semibold text-black">
@@ -654,8 +757,11 @@ export default function LoginScreen() {
 
       {error && <Text className="text-center text-sm text-red-600">{error}</Text>}
 
-      {/* ClassLink: launchpad link with a fixed prefix; user types only the code. */}
-      {fromCustom && isClassLink && (
+      {/* ClassLink: launchpad link with a fixed prefix; user types only the
+          code. Only shown for a Custom ClassLink login — a district picked
+          from the list already has its code resolved and shows it in the
+          item above instead. */}
+      {isClassLink && fromCustom && (
         <View className="gap-2">
           <Text className="text-sm font-medium text-black">District Link</Text>
           <View className="w-full flex-row items-center rounded-md border border-black/15 bg-white/70 px-3">
@@ -723,8 +829,11 @@ export default function LoginScreen() {
         </View>
       )}
 
-      {showCredentials && authInfo.credentials && (
+      {showCredForm && (
         <>
+          {activeTitle ? (
+            <Text className="text-sm font-semibold text-black">{activeTitle}</Text>
+          ) : null}
           <View className="gap-2">
             <Text className="text-sm font-medium text-black">Username</Text>
             <Field
@@ -762,7 +871,7 @@ export default function LoginScreen() {
           }}>
           <Text className="text-black">Back</Text>
         </Button>
-        {showCredentials && authInfo.credentials && (
+        {showCredForm && (
           <Button className="flex-1 flex-row gap-2" disabled={!canSubmit} onPress={() => doLogin()}>
             {loading && <Spinner size="small" color={spinnerColor} />}
             <Text>Login</Text>
@@ -770,25 +879,60 @@ export default function LoginScreen() {
         )}
       </View>
 
-      {/* Microsoft SSO (mobile-only): opens the portal's real Microsoft sign-in in
-          a WebView and hands the resulting session cookies to the API. */}
-      {showCredentials && authInfo.microsoft && (
+      {/* Alternative sign-in methods the district also offers. Each is a switch
+          button (fixing the old one-way behaviour where the button vanished with
+          no way back to credentials). A separator "or" shows when a credential
+          form sits above them. */}
+      {showCredentials &&
+        (authInfo.microsoft ||
+          (authInfo.classlink && !isClassLink) ||
+          (authInfo.credentials && isClassLink)) && (
         <>
-          {authInfo.credentials && (
-            <Text className="text-center text-xs text-black/40">or</Text>
+          {showCredForm && <Text className="text-center text-xs text-black/40">or</Text>}
+
+          {/* Switch into the ClassLink launchpad-code credential flow. */}
+          {authInfo.classlink && !isClassLink && (
+            <Button
+              variant="outline"
+              className="w-full flex-row gap-2"
+              style={[WHITE_BUTTON, loading && { opacity: 0.5 }]}
+              disabled={loading}
+              onPress={() => switchMethod('classlink')}>
+              <Image source={CLASSLINK_LOGO} style={{ width: 18, height: 18 }} resizeMode="contain" />
+              <Text className="text-black">{classlinkTitle || 'Sign in with ClassLink'}</Text>
+            </Button>
           )}
-          <Button
-            variant="outline"
-            className="w-full flex-row gap-2"
-            style={[WHITE_BUTTON, loading && { opacity: 0.5 }]}
-            disabled={loading || !ssoUrl}
-            onPress={() => {
-              setError(null);
-              setMsSilent(false);
-              setMsOpen(true);
-            }}>
-            <Text className="text-black">Sign in with Microsoft</Text>
-          </Button>
+
+          {/* Switch back to the plain credentials form (from ClassLink). */}
+          {authInfo.credentials && isClassLink && (
+            <Button
+              variant="outline"
+              className="w-full flex-row gap-2"
+              style={[WHITE_BUTTON, loading && { opacity: 0.5 }]}
+              disabled={loading}
+              onPress={() => switchMethod('credentials')}>
+              <Icon as={KeyRound} className="text-black" size={18} />
+              <Text className="text-black">{credTitle || 'Sign in with Credentials'}</Text>
+            </Button>
+          )}
+
+          {/* Microsoft SSO (mobile-only): opens the portal's real Microsoft sign-in
+              in a WebView and hands the resulting session cookies to the API. */}
+          {authInfo.microsoft && (
+            <Button
+              variant="outline"
+              className="w-full flex-row gap-2"
+              style={[WHITE_BUTTON, (loading || !ssoUrl) && { opacity: 0.5 }]}
+              disabled={loading || !ssoUrl}
+              onPress={() => {
+                setError(null);
+                setMsSilent(false);
+                setMsOpen(true);
+              }}>
+              <MicrosoftLogo />
+              <Text className="text-black">{microsoftTitle || 'Sign in with Microsoft'}</Text>
+            </Button>
+          )}
         </>
       )}
     </View>

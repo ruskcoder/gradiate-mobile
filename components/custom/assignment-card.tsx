@@ -111,7 +111,7 @@ export const AssignmentCard = React.memo(function AssignmentCard({
               {hideColors && (
                 <View
                   pointerEvents="none"
-                  style={[StyleSheet.absoluteFillObject, { backgroundColor: scrim }]}
+                  style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
                 />
               )}
               <Text

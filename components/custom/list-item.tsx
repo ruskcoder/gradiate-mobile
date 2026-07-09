@@ -27,7 +27,10 @@ export function ListItem({
   onPress,
   rightContent,
 }: ListItemProps) {
-  const bgColor = squareColor || 'var(--primary)';
+  // A concrete color (hex/rgb from the portal) goes inline. Only apply the default
+  // bg-primary class if squareColor is explicitly undefined (not provided). If it's
+  // an empty string, a CSS var, or another falsy value, leave the square uncolored.
+  const hasConcreteColor = !!squareColor && squareColor !== '' && !squareColor.startsWith('var(');
   const isTextSquare = typeof squareText === 'string' || typeof squareText === 'number';
 
   return (
@@ -39,8 +42,11 @@ export function ListItem({
       )}>
       <View className="mr-2 min-w-0 flex-1 flex-row items-center">
         <View
-          className="mr-3 aspect-square h-11 items-center justify-center rounded-sm"
-          style={{ backgroundColor: bgColor }}>
+          className={cn(
+            'mr-3 aspect-square h-11 items-center justify-center rounded-sm',
+            squareColor === undefined && 'bg-primary'
+          )}
+          style={hasConcreteColor ? { backgroundColor: squareColor } : undefined}>
           {isTextSquare ? (
             <Text className="text-[1.35rem] font-semibold tracking-wide text-white">
               {squareText}

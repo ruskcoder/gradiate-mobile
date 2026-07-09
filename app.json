@@ -1,13 +1,11 @@
 {
   "expo": {
     "name": "Gradexis",
-    "displayName": "Gradexis",
     "slug": "gradexis",
     "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gradexis",
-    "jsEngine": "hermes",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
@@ -26,7 +24,6 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#93CEFF"
       },
-      "edgeToEdge": true,
       "versionCode": 19,
       "permissions": [
         "android.permission.RECORD_AUDIO"
@@ -65,7 +62,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true

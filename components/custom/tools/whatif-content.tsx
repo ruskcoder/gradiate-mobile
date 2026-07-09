@@ -110,33 +110,27 @@ export function WhatIfContent({ classData }: { classData: ClassData }) {
   const [targetCategory, setTargetCategory] = React.useState('');
   const [targetWeight, setTargetWeight] = React.useState('1');
   const [targetAverage, setTargetAverage] = React.useState('');
-  const [targetRequired, setTargetRequired] = React.useState<number | null>(null);
 
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [newCategoryWeight, setNewCategoryWeight] = React.useState('');
 
   // Reset local "what if" state whenever a different course is loaded.
-  React.useEffect(() => {
+  const [prevClassData, setPrevClassData] = React.useState(classData);
+  if (classData !== prevClassData) {
+    setPrevClassData(classData);
     setCurrent(normalizeExemptDropped(classData));
-  }, [classData]);
+  }
 
-  React.useEffect(() => {
-    if (!targetCategory || !targetAverage || !current?.categories) {
-      setTargetRequired(null);
-      return;
-    }
+  // Fully derived from the target inputs + current categories, so it's
+  // computed during render instead of latched into its own state.
+  const targetRequired = React.useMemo(() => {
+    if (!targetCategory || !targetAverage || !current?.categories) return null;
 
     const targetAvgVal = parseFloat(targetAverage);
-    if (isNaN(targetAvgVal) || targetAvgVal < 0 || targetAvgVal > 100) {
-      setTargetRequired(null);
-      return;
-    }
+    if (isNaN(targetAvgVal) || targetAvgVal < 0 || targetAvgVal > 100) return null;
 
     const currentCategoryData = current.categories[targetCategory];
-    if (!currentCategoryData) {
-      setTargetRequired(null);
-      return;
-    }
+    if (!currentCategoryData) return null;
 
     const categoryStates: Record<string, any> = {};
     let totalWeight = 0;
@@ -170,10 +164,8 @@ export function WhatIfContent({ classData }: { classData: ClassData }) {
       ((requiredTargetCatPercent / 100) * (currentMaxPoints + newAssignmentTotalPoints * targetWtVal) -
         currentStudentPoints) /
       targetWtVal;
-    const newAssignmentPercentage = (newAssignmentScore / newAssignmentTotalPoints) * 100;
-
-    setTargetRequired(newAssignmentPercentage);
-  }, [targetCategory, targetAverage, targetWeight, current?.categories]);
+    return (newAssignmentScore / newAssignmentTotalPoints) * 100;
+  }, [targetCategory, targetAverage, targetWeight, current]);
 
   const handleAddManualGrade = () => {
     const percentage = parseFloat(manualPercentage);
@@ -238,7 +230,6 @@ export function WhatIfContent({ classData }: { classData: ClassData }) {
     setTargetCategory('');
     setTargetWeight('1');
     setTargetAverage('');
-    setTargetRequired(null);
   };
 
   const handleRemoveGrade = (index: number) => {

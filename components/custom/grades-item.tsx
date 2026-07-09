@@ -121,7 +121,7 @@ export function GradesItem({
           style={useThemeColor ? undefined : { backgroundColor: bgColor }}>
           <View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: scrim }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
           />
           <Text className={cn('text-[2.5rem] font-semibold leading-10', textColor)}>
             {displayGrade}
@@ -163,7 +163,7 @@ export function GradesItem({
         {hideColors && (
           <View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: scrim }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
           />
         )}
         <Text className={cn('text-center text-[1.5rem] font-semibold tracking-wide', textColor)}>

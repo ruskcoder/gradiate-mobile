@@ -125,7 +125,9 @@ function ClockFace({
   // to avoid stale closures when `mode` flips from hours to minutes.
   const lastValueRef = React.useRef<number | null>(null);
   const api = React.useRef({ mode, onPickHour, onPickMinute, onHourReleased });
-  api.current = { mode, onPickHour, onPickMinute, onHourReleased };
+  React.useEffect(() => {
+    api.current = { mode, onPickHour, onPickMinute, onHourReleased };
+  });
 
   // Work in window coordinates (`pageX/pageY`) relative to the face's measured
   // origin. `locationX/locationY` are relative to whichever view is under the
@@ -156,7 +158,13 @@ function ClockFace({
     }
   }, []);
 
+  // The closures below only run from native gesture callbacks (long after
+  // mount/commit), never synchronously during render — the lint can't prove
+  // that statically. Recreating the PanResponder per-render/per-dep-change
+  // instead (to avoid the ref) would risk losing gesture continuity if a
+  // dependency changes mid-drag, which is exactly what the `api` ref avoids.
   const responder = React.useRef(
+    // eslint-disable-next-line react-hooks/refs
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
@@ -181,6 +189,7 @@ function ClockFace({
     <View
       ref={viewRef}
       style={{ width: SIZE, height: SIZE }}
+      // eslint-disable-next-line react-hooks/refs
       {...responder.panHandlers}
       accessibilityRole="adjustable"
       accessibilityLabel={mode === 'hours' ? 'Select hour' : 'Select minute'}>

@@ -120,13 +120,20 @@ export function Calendar({ month, year, events, loading, onMonthChange }: Calend
                     {cell.date}
                   </Text>
                   <View className="h-1.5 flex-row gap-0.5">
-                    {dayEvents.slice(0, 3).map((evt, i) => (
-                      <View
-                        key={i}
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: evt.color || 'var(--primary)' }}
-                      />
-                    ))}
+                    {dayEvents.slice(0, 3).map((evt, i) => {
+                      // A concrete portal color goes inline; otherwise the theme
+                      // primary via `bg-primary` (RN can't resolve a `var(--primary)`
+                      // string inline, which left Skyward's colorless events as
+                      // invisible dots).
+                      const hasColor = !!evt.color && !evt.color.startsWith('var(');
+                      return (
+                        <View
+                          key={i}
+                          className={cn('h-1.5 w-1.5 rounded-full', !hasColor && 'bg-primary')}
+                          style={hasColor ? { backgroundColor: evt.color } : undefined}
+                        />
+                      );
+                    })}
                   </View>
                 </>
               ) : (

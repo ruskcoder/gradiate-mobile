@@ -4,13 +4,15 @@ import { ReorderableList } from '@/components/custom/reorderable-list';
 import { Icon } from '@/components/ui/icon';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { flatForest, pathToLabel, barsForPath, type TermNode } from '@/lib/term-tree';
 import { Text } from '@/components/ui/text';
 import { useAppSettings } from '@/lib/app-settings';
 import { applyCourseOrder, getCourseOrder, setCourseOrder } from '@/lib/course-order-storage';
 import { getClasses } from '@/lib/grades-api';
-import { getInitialTerm, getLatestGradesLoad, getTermList, hasStorageData } from '@/lib/grades-store';
+import { getInitialTerm, getLatestGradesLoad, getTermList, getTermTree, getHasSubterms, hasStorageData, reconstructAllInOneClassesFromHistory } from '@/lib/grades-store';
 import { useCurrentUser, useStore } from '@/lib/store';
 import { TOOL_TITLES } from '@/lib/tool-types';
+import { useLatchedValue } from '@/lib/use-latched-value';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft, RefreshCw } from 'lucide-react-native';
 import * as React from 'react';
@@ -31,7 +33,6 @@ import {
   GRADES_CROSSFADE_MS,
   GRADES_DONE_HOLD_MS,
   GRADES_TERM_SHIFT_MS,
-  GRADES_TERM_SHIFT_OFFSET,
   LIST_REVEAL_DURATION_MS,
   GRADES_STANDALONE_CONTENT_REVEAL_DELAY_MS,
 } from '@/lib/constants';
@@ -72,6 +73,10 @@ interface GradesTermPageProps {
   dataStillLoading: boolean;
   progress?: { percent: number; message: string };
   error: string | null;
+  // The deepest selected column of this term's cascade. Switching a subtab
+  // changes it without remounting the page, so it drives the content's own
+  // fade/drift transition (the term-level shift only fires on the top tab).
+  contentLabel: string;
   orderedClasses: Course[];
   storageMode: boolean;
   lastLoaded?: number;
@@ -104,6 +109,7 @@ function GradesTermPage({
   dataStillLoading,
   progress,
   error,
+  contentLabel,
   orderedClasses,
   storageMode,
   lastLoaded,
@@ -124,9 +130,7 @@ function GradesTermPage({
   // Latch the last real progress value so the loading block fades out frozen
   // at "100% / Done!" instead of collapsing to 0%/no-text once the entry is
   // cleared out of the parent's progress map.
-  const lastProgressRef = React.useRef(progress);
-  if (progress) lastProgressRef.current = progress;
-  const displayProgress = progress ?? lastProgressRef.current;
+  const displayProgress = useLatchedValue(progress);
 
   // Frozen at mount: whether this term's very first list reveal should play
   // its cascade. Fixed per-instance (not re-derived on every render) because
@@ -169,7 +173,10 @@ function GradesTermPage({
   // useLayoutEffect, not useEffect: `loadingFadingOut` must flip in the same
   // pre-paint tick `isLoading` does, or there's one painted frame where both
   // are false — the block unmounts and instantly remounts (an intermittent
-  // flash off-then-on).
+  // flash off-then-on). Its setState calls can't move to render (this must
+  // also kick off a Reanimated timeline via `loadingOpacity.value =`, an
+  // imperative side effect, and refs can't be written during render either).
+  /* eslint-disable react-hooks/set-state-in-effect */
   React.useLayoutEffect(() => {
     const pulseIsNew = storageLoadPulse !== lastHandledPulseRef.current;
     lastHandledPulseRef.current = storageLoadPulse;
@@ -204,6 +211,7 @@ function GradesTermPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, animationsEnabled, storageLoadPulse]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Fade and slide in lockstep: as it fades out (1 → 0) it drifts 16px down;
   // on the way in (0 → 1) it settles up from 16px below — the mirror of the
@@ -211,6 +219,60 @@ function GradesTermPage({
   const loadingAnimatedStyle = useAnimatedStyle(() => ({
     opacity: loadingOpacity.value,
     transform: [{ translateY: (1 - loadingOpacity.value) * 16 }],
+  }));
+
+  // Subtab (in-term) transition: switching the selected column changes
+  // `contentLabel` without remounting this page. Rather than cutting straight
+  // to the new column's classes and fading THAT in (which reads as a flash —
+  // the old list vanishes the instant React re-renders with the new data,
+  // a frame before the fade-in even starts), this holds the outgoing column's
+  // classes in local state, fades them out first, and only swaps to the new
+  // column's classes once fully hidden — a genuine fade-out-then-fade-in,
+  // never both/neither visible at once. Skipped on first mount so it never
+  // competes with the initial reveal cascade.
+  const [displayedLabel, setDisplayedLabel] = React.useState(contentLabel);
+  const [displayedClasses, setDisplayedClasses] = React.useState(orderedClasses);
+  const pendingContentRef = React.useRef<{ label: string; classes: Course[] } | null>(null);
+  const contentShift = useSharedValue(1);
+
+  // Replays the list's upward fade-up cascade once the new column's classes
+  // are swapped in, so the "upwards list animation" plays at subtab level just
+  // like the web app.
+  const [revealNonce, setRevealNonce] = React.useState(0);
+
+  const swapPendingContent = React.useCallback(() => {
+    const pending = pendingContentRef.current;
+    if (!pending) return;
+    pendingContentRef.current = null;
+    setDisplayedLabel(pending.label);
+    setDisplayedClasses(pending.classes);
+    setRevealNonce((n) => n + 1);
+    contentShift.value = withTiming(1, { duration: GRADES_TERM_SHIFT_MS, easing: EASE_SHIFT });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    if (contentLabel === displayedLabel) {
+      // Same column, just refreshed data (e.g. a reorder) — no transition needed.
+      setDisplayedClasses(orderedClasses);
+      return;
+    }
+    if (!animationsEnabled) {
+      setDisplayedLabel(contentLabel);
+      setDisplayedClasses(orderedClasses);
+      setRevealNonce((n) => n + 1);
+      contentShift.value = 1;
+      return;
+    }
+    pendingContentRef.current = { label: contentLabel, classes: orderedClasses };
+    contentShift.value = withTiming(0, { duration: GRADES_CROSSFADE_MS }, (finished) => {
+      if (finished) runOnJS(swapPendingContent)();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentLabel, orderedClasses, animationsEnabled]);
+
+  const contentShiftStyle = useAnimatedStyle(() => ({
+    opacity: contentShift.value,
   }));
 
   const showContentBlock = !isLoading && !loadingFadingOut;
@@ -277,7 +339,7 @@ function GradesTermPage({
             </Animated.Text>
           )}
 
-          {!error && orderedClasses.length === 0 && (
+          {!error && displayedClasses.length === 0 && (
             <Animated.Text
               entering={animationsEnabled ? CONTENT_REVEAL : undefined}
               className="py-6 text-center text-muted-foreground">
@@ -285,16 +347,17 @@ function GradesTermPage({
             </Animated.Text>
           )}
 
-          {!error && orderedClasses.length > 0 && (
-            <>
+          {!error && displayedClasses.length > 0 && (
+            <Animated.View style={animationsEnabled ? contentShiftStyle : undefined}>
               {gradesView === 'list' ? (
                 <ReorderableList
-                  items={orderedClasses}
+                  items={displayedClasses}
                   keyExtractor={(c) => c.course}
                   itemHeight={68}
                   gap={8}
                   animateReveal={shouldAnimateReveal}
                   revealDelayMs={GRADES_CONTENT_REVEAL_DELAY_MS}
+                  revealNonce={revealNonce}
                   onReorder={onReorder}
                   renderItem={(course, isDragging) => (
                     <GradesItem
@@ -320,9 +383,9 @@ function GradesTermPage({
                       if (h > 0) onMeasureCardHeight(h);
                     }}>
                     <GradesItem
-                      courseName={orderedClasses[0].name}
-                      id={orderedClasses[0].course}
-                      grade={orderedClasses[0].average}
+                      courseName={displayedClasses[0].name}
+                      id={displayedClasses[0].course}
+                      grade={displayedClasses[0].average}
                       hideColors={hideColors}
                       numberDisplay={numberDisplay}
                       variant="card"
@@ -330,7 +393,7 @@ function GradesTermPage({
                   </View>
                   {cardHeight > 0 && (
                     <ReorderableList
-                      items={orderedClasses}
+                      items={displayedClasses}
                       keyExtractor={(c) => c.course}
                       itemHeight={cardHeight}
                       gap={12}
@@ -338,6 +401,7 @@ function GradesTermPage({
                       columnGap={12}
                       animateReveal={shouldAnimateReveal}
                       revealDelayMs={GRADES_CONTENT_REVEAL_DELAY_MS}
+                      revealNonce={revealNonce}
                       onReorder={onReorder}
                       renderItem={(course, isDragging) => (
                         <GradesItem
@@ -354,7 +418,7 @@ function GradesTermPage({
                   )}
                 </>
               )}
-            </>
+            </Animated.View>
           )}
         </View>
       )}
@@ -400,17 +464,13 @@ function TermPageShift({
 }: TermPageShiftProps) {
   const animatedStyle = useAnimatedStyle(() => {
     const p = progress.value;
-    const offset = stageWidth * GRADES_TERM_SHIFT_OFFSET;
-    if (termIndex === toIndex.value) {
-      // Incoming: fades in (0→1) drifting from the travel direction into place.
-      return { opacity: p, transform: [{ translateX: (1 - p) * direction.value * offset }] };
-    }
-    if (termIndex === fromIndex.value) {
-      // Outgoing: fades out (1→0) drifting the same way, off the opposite edge.
-      return { opacity: 1 - p, transform: [{ translateX: -p * direction.value * offset }] };
-    }
+    // Pure opacity cross-fade — no horizontal slide (matches the web app, which
+    // only cross-fades term pages). The incoming list's own upward cascade
+    // supplies the sense of motion instead of the whole page sliding.
+    if (termIndex === toIndex.value) return { opacity: p };
+    if (termIndex === fromIndex.value) return { opacity: 1 - p };
     // Not part of this transition — kept mounted but fully hidden.
-    return { opacity: 0, transform: [{ translateX: 0 }] };
+    return { opacity: 0 };
   });
 
   // The active page stays in normal flow so the stage is exactly as tall as the
@@ -456,8 +516,13 @@ export default function Screen() {
 
   const [terms, setTerms] = React.useState<string[]>([]);
   const [currentTerm, setCurrentTerm] = React.useState('');
-  const [subterms, setSubterms] = React.useState<Record<string, string[]>>({});
-  const [selectedSubterm, setSelectedSubterm] = React.useState('All');
+  // All-in-one portals (Skyward/PowerSchool) send a `termTree` — a nested forest
+  // of columns cascading to arbitrary depth (PR → term → semester → year). Roots
+  // are the top tabs; each deeper level of the selected path gets its own subtab
+  // bar. `selectedPath` is the root→node path of the active tab's drill-down; the
+  // deepest entry is the label whose averages we show.
+  const [termTree, setTermTree] = React.useState<TermNode[]>([]);
+  const [selectedPath, setSelectedPath] = React.useState<string[]>([]);
   const [dataFormat, setDataFormat] = React.useState<'scores' | 'terms' | null>(null);
   const [classesByTerm, setClassesByTerm] = React.useState<Record<string, Course[]>>({});
   const [rawTermClasses, setRawTermClasses] = React.useState<Course[]>([]);
@@ -510,10 +575,13 @@ export default function Screen() {
     };
   }, []);
 
-  React.useEffect(() => {
-    if (!currentTerm) return;
-    setVisitedTerms((prev) => (prev[currentTerm] ? prev : { ...prev, [currentTerm]: true }));
-  }, [currentTerm]);
+  const [prevCurrentTermForVisit, setPrevCurrentTermForVisit] = React.useState(currentTerm);
+  if (currentTerm !== prevCurrentTermForVisit) {
+    setPrevCurrentTermForVisit(currentTerm);
+    if (currentTerm) {
+      setVisitedTerms((prev) => (prev[currentTerm] ? prev : { ...prev, [currentTerm]: true }));
+    }
+  }
 
   const scheduleDoneHold = React.useCallback((key: string) => {
     if (doneHoldTimers.current[key]) clearTimeout(doneHoldTimers.current[key]);
@@ -553,9 +621,19 @@ export default function Screen() {
           setDataFormat(format);
 
           if (initial) {
-            setTerms(chunk.termList);
-            if (chunk.subterms) setSubterms(chunk.subterms);
-            if (!userHasSelectedTerm.current) setCurrentTerm(chunk.term);
+            // Roots of the forest are the top tabs; deeper levels cascade as
+            // subtab bars. Portals without a `termTree` (HAC, per-term re-fetch)
+            // fall back to a flat depth-1 forest = the terms themselves.
+            const forest = chunk.termTree?.length ? chunk.termTree : flatForest(chunk.termList);
+            setTermTree(forest);
+            setTerms(forest.map((n: TermNode) => n.label));
+            if (!userHasSelectedTerm.current) {
+              // Default selection: the path down to the API's current term.
+              const path = pathToLabel(forest, chunk.term);
+              const defaultPath = path.length ? path : [chunk.term];
+              setCurrentTerm(defaultPath[0]);
+              setSelectedPath(defaultPath);
+            }
 
             if (format === 'terms' && chunk.termsIncluded) {
               const raw: Course[] = chunk.classes || [];
@@ -618,6 +696,8 @@ export default function Screen() {
   }, []);
 
   React.useEffect(() => {
+    // Kicks off the initial fetch on mount; fetchClasses sets loading state as the fetch begins.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchClasses(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -639,9 +719,20 @@ export default function Screen() {
   const handleTabChange = (term: string) => {
     userHasSelectedTerm.current = true;
     setCurrentTerm(term);
-    setSelectedSubterm('All');
+    // Reset the drill-down to the freshly-selected top tab.
+    setSelectedPath([term]);
     if (classesByTerm[term] || loadingTerms[term]) return;
     fetchClasses(term);
+  };
+
+  // Select a column at subtab-bar level `level`: the parent itself collapses to
+  // that level's own grade; a child drills one level deeper. Appends the newly
+  // reachable level's default (its own roll-up) so grades resolve immediately.
+  const handleSubtabChange = (level: number, value: string, parent: string) => {
+    setSelectedPath((prev) => {
+      const base = prev.slice(0, level + 1);
+      return value === parent ? base : [...base, value];
+    });
   };
 
   const handleLoadFromStorage = (term?: string) => {
@@ -669,8 +760,28 @@ export default function Screen() {
       });
     }
     if (isInitialLoad) {
-      setTerms(getTermList());
-      setCurrentTerm(termToLoad);
+      // Rebuild the cascade from storage: prefer the live forest, else the
+      // persisted `termTree` (so nested subtabs survive an offline load), only
+      // falling back to a flat forest when no tree was ever stored.
+      const storedTree = getTermTree();
+      const forest = termTree.length
+        ? termTree
+        : storedTree.length
+          ? storedTree
+          : flatForest(getTermList());
+      setTermTree(forest);
+      setTerms(forest.map((n) => n.label));
+      const path = pathToLabel(forest, termToLoad);
+      const defaultPath = path.length ? path : [termToLoad];
+      setCurrentTerm(defaultPath[0]);
+      setSelectedPath(defaultPath);
+      // All-in-one portals resolve grades from a per-class `averages` dict read
+      // by the selected column label; rebuild that from history so the cascading
+      // subtabs render offline just like a live payload.
+      if (getHasSubterms() || storedTree.length) {
+        setDataFormat('terms');
+        setRawTermClasses(reconstructAllInOneClassesFromHistory());
+      }
     }
     setClassesByTerm((prev) => ({ ...prev, [termToLoad]: latestLoad.classes }));
     // Deliberately DON'T touch `progressByTerm` here: the overlay should fade
@@ -692,22 +803,22 @@ export default function Screen() {
     setDoneHoldElapsed((prev) => ({ ...prev, initial: true, [termToLoad]: true }));
   };
 
-  // Filters + orders a given term's classes for display — generalized over
-  // `term`/`subterm` (rather than always reading `currentTerm`/`selectedSubterm`)
-  // so every term's `GradesTermPage` can compute its own data independently.
+  // Filters + orders a term's classes for display. `term` is the top tab (used
+  // for the saved course order); `label` is the deepest selected column of that
+  // tab's cascade (root, an intermediate, or a leaf) whose averages we read — so
+  // every term's `GradesTermPage` can compute its own data independently.
   const getOrderedClassesForTerm = React.useCallback(
-    (term: string, subterm: string): Course[] => {
+    (term: string, label: string): Course[] => {
       let filtered: Course[];
       if (dataFormat === 'scores') filtered = classesByTerm[term] || [];
-      else if (!term) filtered = [];
-      else if (subterm === 'All') filtered = classesByTerm[term] || [];
+      else if (!label) filtered = [];
       else {
         filtered = rawTermClasses
           .filter((course) => {
-            const v = course.averages?.[subterm];
+            const v = course.averages?.[label];
             return v !== undefined && v !== ('' as any) && !isNaN(v as number);
           })
-          .map((course) => ({ ...course, average: course.averages![subterm] }));
+          .map((course) => ({ ...course, average: course.averages![label] }));
       }
       return applyCourseOrder(filtered, courseOrderByTerm[term] ?? null, (c) => c.course);
     },
@@ -738,14 +849,15 @@ export default function Screen() {
   // mounted (so switching tabs later doesn't replay their entrance); the grades
   // area below handles its own per-term loading from then on.
   const [chromeRevealed, setChromeRevealed] = React.useState(false);
-  React.useEffect(() => {
+  const [prevIsLoadingForChrome, setPrevIsLoadingForChrome] = React.useState(isLoading);
+  if (isLoading !== prevIsLoadingForChrome) {
+    setPrevIsLoadingForChrome(isLoading);
     if (!isLoading) setChromeRevealed(true);
-  }, [isLoading]);
-  // `chromeRevealed || !isLoading`, not just `chromeRevealed`: the effect above
-  // only sets the state *after* paint, so on the frame loading first ends the
-  // tabs would be a frame late — appearing just after the content and nudging it
-  // down. The `!isLoading` term shows them in the same frame; `chromeRevealed`
-  // then keeps them up through later per-term loading.
+  }
+  // `chromeRevealed || !isLoading`, not just `chromeRevealed`: even though the
+  // adjustment above applies in the same render `isLoading` flips (no frame
+  // lag), the `!isLoading` term is kept as a belt-and-suspenders guard so the
+  // tabs never wait on `chromeRevealed` catching up.
   const showTabs = (chromeRevealed || !isLoading) && terms.length > 0;
 
   // The pre-tabs `InitialLoadingOverlay` fades out IN PLACE (its own opacity,
@@ -761,7 +873,9 @@ export default function Screen() {
     else fetchClasses(null, true);
   };
 
-  const openCourse = (term: string, subterm: string, course: Course) => {
+  // `term` is the top tab; `label` is the deepest selected column of its cascade
+  // (what the grade shown belongs to, and what detail should be fetched for).
+  const openCourse = (term: string, label: string, course: Course) => {
     if (!course.average) return;
     if (toolMode) {
       router.push({
@@ -771,7 +885,7 @@ export default function Screen() {
           id: course.course,
           name: course.name,
           average: String(course.average),
-          term,
+          term: label,
         },
       });
       return;
@@ -783,7 +897,7 @@ export default function Screen() {
         name: course.name,
         average: String(course.average),
         term,
-        subterm,
+        subterm: label,
         dataFormat: dataFormat ?? '',
       },
     });
@@ -888,20 +1002,24 @@ export default function Screen() {
               </TabsList>
             </Tabs>
 
-            {subterms[currentTerm]?.length > 0 && (
-              <Tabs value={selectedSubterm} onValueChange={setSelectedSubterm} className="mb-3 w-full">
+            {/* One subtab bar per level of the selected path that has children,
+                so the cascade shows as many rows as the district defines. The
+                first pill in each bar is the parent's own roll-up grade. */}
+            {barsForPath(termTree, selectedPath).map((bar, level) => (
+              <Tabs
+                key={bar.parent}
+                value={bar.selected}
+                onValueChange={(v) => handleSubtabChange(level, v, bar.parent)}
+                className="mb-3 w-full">
                 <TabsList className="w-full">
-                  {subterms[currentTerm].map((sub) => (
+                  {[bar.parent, ...bar.options].map((sub) => (
                     <TabsTrigger key={sub} value={sub} className="flex-1">
                       <Text>{sub}</Text>
                     </TabsTrigger>
                   ))}
-                  <TabsTrigger value="All" className="flex-1">
-                    <Text>All</Text>
-                  </TabsTrigger>
                 </TabsList>
               </Tabs>
-            )}
+            ))}
           </Animated.View>
         )}
 
@@ -913,13 +1031,16 @@ export default function Screen() {
           <View
             style={{ overflow: 'hidden' }}
             onLayout={(e) => setStageWidth(Math.round(e.nativeEvent.layout.width))}>
+            {/* eslint-disable-next-line react-hooks/refs */}
             {terms.map((term) => {
               const isActive = term === currentTerm;
               // Never-visited, non-active terms have nothing to show and no
               // layout slot to hold (pages are stacked, not in a row), so skip
               // mounting them entirely until they're first selected.
               if (!isActive && !visitedTerms[term]) return null;
-              const subterm = isActive ? selectedSubterm : 'All';
+              // Active tab shows its deepest selected column; inactive tabs show
+              // their own root roll-up.
+              const label = isActive ? (selectedPath[selectedPath.length - 1] || term) : term;
               const courseOrderLoadedForTerm = !!courseOrderLoadedTerms[term];
               const dataStillLoadingForTerm = !!loadingTerms[term] || !courseOrderLoadedForTerm;
               const doneHoldPendingForTerm = !(doneHoldElapsed[term] ?? true);
@@ -941,10 +1062,15 @@ export default function Screen() {
                     dataStillLoading={dataStillLoadingForTerm}
                     progress={progressByTerm[term] ?? progressByTerm.initial}
                     error={errorByTerm[term] ?? null}
-                    orderedClasses={getOrderedClassesForTerm(term, subterm)}
+                    contentLabel={label}
+                    orderedClasses={getOrderedClassesForTerm(term, label)}
                     storageMode={!!storageModeByTerm[term]}
                     lastLoaded={lastLoadedByTerm[term]}
                     animationsEnabled={animationsEnabled}
+                    // Intentionally read/written outside an effect: this ref is a mount-time
+                    // flag store, not reactive state — turning it into state would add a
+                    // re-render (of every visited term page) every time a new term first
+                    // reveals, which is exactly what the ref avoids.
                     alreadyRevealed={revealedTermsRef.current.has(term)}
                     onFirstReveal={() => revealedTermsRef.current.add(term)}
                     gradesView={gradesView}
@@ -953,7 +1079,7 @@ export default function Screen() {
                     cardHeight={cardHeight}
                     onMeasureCardHeight={(h) => setCardHeight((prev) => (prev === h ? prev : h))}
                     onReorder={(next) => handleReorder(term, next)}
-                    onOpenCourse={(course) => openCourse(term, subterm, course)}
+                    onOpenCourse={(course) => openCourse(term, label, course)}
                     onLoadFromStorage={() => handleLoadFromStorage(term)}
                     canLoadFromStorage={hasStorageData(term)}
                     storageLoadPulse={storageLoadPulseByTerm[term] ?? 0}
@@ -1027,9 +1153,7 @@ function InitialLoadingOverlay({
 }: InitialLoadingOverlayProps) {
   // Latch the last real progress so it fades out frozen at whatever it was
   // showing, instead of blanking if the parent clears the entry mid-fade.
-  const lastProgressRef = React.useRef(progress);
-  if (progress) lastProgressRef.current = progress;
-  const displayProgress = progress ?? lastProgressRef.current;
+  const displayProgress = useLatchedValue(progress);
 
   const opacity = useSharedValue(1);
   // One-way latch: this overlay is a one-shot. It sits at full opacity while

@@ -8,6 +8,14 @@ export const PLATFORM_MAPPING: Record<string, string> = {
   powerschool: 'PowerSchool',
 };
 
+/** Optional per-method sign-in titles a district can declare (e.g. PowerSchool
+ *  parent-vs-student). Keyed by method name. */
+export interface LoginTitles {
+  credentials?: string;
+  classlink?: string;
+  microsoft?: string;
+}
+
 export interface District {
   name: string;
   platform: string;
@@ -17,6 +25,52 @@ export interface District {
   // classlinkCredentials accounts (whose `link` is the discovered portal, not
   // the launchpad link the code comes from).
   code?: string;
+  // Optional custom section titles per sign-in method (e.g. Houston ISD:
+  // credentials = "Parent Login", microsoft = "Student Login").
+  loginTitles?: LoginTitles;
+}
+
+/** The sign-in methods a district's portal offers. */
+export interface LoginMethods {
+  credentials: boolean;
+  classlink: boolean;
+  microsoft: boolean;
+  // The ClassLink district code when the loginType declares it inline
+  // ("classlink:katyisd"); '' when it must be derived from the link instead.
+  classlinkCode: string;
+}
+
+/**
+ * Parse a district's `loginType` field into the set of methods it offers.
+ * districts.json encodes multiple methods slash-separated, e.g.
+ * "credentials/classlink" or "credentials/microsoft"; a bare "credentials" (or
+ * empty) means credentials-only. Because the list already declares this, a
+ * listed district never needs the `/authMethods` probe — only the Custom flow
+ * (an arbitrary, undeclared link) does.
+ *
+ * A `classlink` token may carry the district code inline as
+ * "classlink:<code>" (e.g. "credentials/classlink:katyisd"); the code is pulled
+ * out so the ClassLink field can prefill with it instead of guessing from the
+ * portal link.
+ */
+export function parseLoginMethods(loginType: string): LoginMethods {
+  let classlinkCode = '';
+  const names = String(loginType || 'credentials')
+    .split('/')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      const idx = tok.indexOf(':');
+      const name = (idx === -1 ? tok : tok.slice(0, idx)).trim().toLowerCase();
+      if (name === 'classlink' && idx !== -1) classlinkCode = tok.slice(idx + 1).trim();
+      return name;
+    });
+  return {
+    credentials: names.length === 0 || names.includes('credentials'),
+    classlink: names.includes('classlink'),
+    microsoft: names.includes('microsoft'),
+    classlinkCode,
+  };
 }
 
 export const LOGIN_TYPES = [
