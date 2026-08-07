@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function key(term: string) {
-  return `gradexis.courseOrder.${term}`;
+  return `gradiate.courseOrder.${term}`;
 }
 
 export async function getCourseOrder(term: string): Promise<string[] | null> {

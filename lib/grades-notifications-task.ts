@@ -4,7 +4,7 @@ import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-export const GRADES_NOTIFICATIONS_TASK = 'gradexis-grades-notifications-check';
+export const GRADES_NOTIFICATIONS_TASK = 'gradiate-grades-notifications-check';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({

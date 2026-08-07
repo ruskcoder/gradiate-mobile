@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
-const STORAGE_KEY = 'gradexis.themeMode';
+const STORAGE_KEY = 'gradiate.themeMode';
 
 export async function getStoredThemeMode(): Promise<ThemeMode | null> {
   try {

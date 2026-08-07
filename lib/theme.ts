@@ -1,10 +1,5 @@
 import { DarkTheme, DefaultTheme, type Theme } from 'expo-router/react-navigation';
 
-// Mirrors gradexis-web/src/theme.css (:root / .dark) so navigation chrome
-// (status bar / stack background, etc.) matches the app's actual default
-// look. Values are hex since React Navigation's Theme colors are consumed
-// directly (not through Uniwind/Tailwind), so oklch() strings would be
-// silently dropped on native.
 export const THEME = {
   light: {
     background: '#ffffff',

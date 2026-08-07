@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'gradexis.colorThemeId';
+const STORAGE_KEY = 'gradiate.colorThemeId';
 
 export async function getStoredColorThemeId(): Promise<string | null> {
   try {

@@ -1,4 +1,4 @@
-export const APP_NAME = 'Gradexis';
+export const APP_NAME = 'Gradiate';
 
 export const PLATFORMS = ['hac', 'skyward-legacy', 'powerschool'] as const;
 
@@ -100,7 +100,7 @@ export function classlinkCodeFromLink(link: string): string {
   return cleaned.split(/[/?#]/)[0]!.trim();
 }
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gradexis.app/';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gradiate.app/';
 
 export const API_PLATFORM_ENDPOINTS: Record<(typeof PLATFORMS)[number], string> = {
   hac: '/hac/',

@@ -6,7 +6,7 @@ import { API_URL } from '@/lib/constants';
 import { currentUser } from '@/lib/store';
 import { checkGradesAndNotify } from '@/lib/grades-notifications-task';
 
-export const PUSH_TRIGGER_TASK = 'gradexis-push-trigger';
+export const PUSH_TRIGGER_TASK = 'gradiate-push-trigger';
 
 /**
  * Handles the server's silent "go fetch" push. The API never sees the user's

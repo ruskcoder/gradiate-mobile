@@ -78,7 +78,7 @@ function Logo() {
           <Path d={LOGO_PATH} />
         </Svg>
       </View>
-      <Text className="text-4xl font-extrabold tracking-tight text-black">Gradexis</Text>
+      <Text className="text-4xl font-extrabold tracking-tight text-black">Gradiate</Text>
     </View>
   );
 }
@@ -271,7 +271,7 @@ export default function LoginScreen() {
     (async () => {
       try {
         setLoadingDistricts(true);
-        const response = await fetch('https://web.gradexis.app/districts.json');
+        const response = await fetch('https://web.gradiate.app/districts.json');
         if (!response.ok) throw new Error('Failed to fetch districts');
         setDistricts(await response.json());
       } catch (e) {

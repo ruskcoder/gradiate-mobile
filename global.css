@@ -13,9 +13,6 @@
   --spacing-hairline: hairlineWidth();
 }
 
-/* Base palette mirrors gradexis-web/src/theme.css (:root / .dark) so the two
-   apps start from the same default look before any color-theme picker
-   selection is applied. */
 @layer theme {
   :root {
     @variant light {
