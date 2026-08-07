@@ -71,8 +71,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "1de7adf2-c226-4dfd-b214-281496c82a3e"
+        "projectId": "280fcc21-aa7a-4ff1-859b-4eae4736de9d"
       }
-    }
+    },
+    "owner": "ruskcoder"
   }
 }
