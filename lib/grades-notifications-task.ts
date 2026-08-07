@@ -2,6 +2,7 @@ import { currentUser, hydrateSecureCredentials, useStore } from '@/lib/store';
 import { getClasses } from '@/lib/grades-api';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 
 export const GRADES_NOTIFICATIONS_TASK = 'gradexis-grades-notifications-check';
 
@@ -63,7 +64,9 @@ export async function checkGradesAndNotify(): Promise<boolean> {
   await hydrateSecureCredentials();
 
   const user = currentUser();
-  if (!user || !user.notificationsEnabled) {
+  // Accounts saved before this preference existed have `undefined`; throughout
+  // the UI that means enabled, so background execution must match.
+  if (!user || user.notificationsEnabled === false) {
     return false;
   }
   // Nothing to fetch with if credentials never made it back from the keystore.
@@ -127,8 +130,9 @@ export async function checkGradesAndNotify(): Promise<boolean> {
           body: multi
             ? `${course.name} (${term}) changed from ${oldAverage} to ${newAverage}.`
             : `Your grade for ${course.name} changed from ${oldAverage} to ${newAverage}.`,
+          ...(Platform.OS === 'android' ? { sound: 'default' } : {}),
         },
-        trigger: null,
+        trigger: Platform.OS === 'android' ? { channelId: 'grades' } : null,
       });
     }
   }
@@ -164,6 +168,13 @@ export async function setGradesNotificationsEnabled(enabled: boolean): Promise<v
   if (enabled) {
     const granted = await requestNotificationPermission();
     if (!granted) return;
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('grades', {
+        name: 'Grade updates',
+        importance: Notifications.AndroidImportance.HIGH,
+      });
+    }
 
     await BackgroundTask.registerTaskAsync(GRADES_NOTIFICATIONS_TASK, {
       minimumInterval: 60, // minutes; OS schedules opportunistically around this.

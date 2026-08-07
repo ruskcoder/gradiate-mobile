@@ -48,6 +48,10 @@ function AppContent() {
   const isFullBleed = pathname === '/login';
 
   const user = useCurrentUser();
+  const notificationsEnabled = !!user && user.notificationsEnabled !== false;
+  const notificationAccountKey = user
+    ? `${user.platform}|${user.username}|${user.link}`
+    : '';
 
   // Apply the current account's color theme (or "default" when logged out /
   // unset). This has to run even for the default theme — global.css's raw
@@ -72,12 +76,15 @@ function AppContent() {
   // account's notification setting (also re-registers it on cold start so it
   // survives app restarts, since the OS can clear task registrations).
   React.useEffect(() => {
-    setGradesNotificationsEnabled(!!user?.notificationsEnabled);
+    setGradesNotificationsEnabled(notificationsEnabled);
     // Register this device's Expo push token with the API so the server's
     // periodic trigger can wake us to fetch. Primary path; the background task
     // above is the fallback. Safe to call on every load (API upserts).
     subscribeForPush();
-  }, [user?.notificationsEnabled]);
+  }, [
+    notificationAccountKey,
+    notificationsEnabled,
+  ]);
 
   // A background API call found the current session/password invalid (see
   // `handleAuthError` in lib/grades-api.ts). Bounce to /login from wherever

@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 import { API_URL } from '@/lib/constants';
 import { currentUser } from '@/lib/store';
 import { checkGradesAndNotify } from '@/lib/grades-notifications-task';
@@ -62,7 +63,9 @@ export async function subscribeForPush(): Promise<void> {
       console.log('Push subscribe skipped: no user logged in');
       return;
     }
-    if (!user.notificationsEnabled) {
+    // Older persisted accounts predate this setting. The UI intentionally
+    // treats an absent value as enabled, so registration must do the same.
+    if (user.notificationsEnabled === false) {
       console.log('Push subscribe skipped: notifications disabled in settings');
       return;
     }
@@ -71,6 +74,13 @@ export async function subscribeForPush(): Promise<void> {
     if (!granted) {
       console.log('Push subscribe skipped: notification permission not granted');
       return;
+    }
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('grades', {
+        name: 'Grade updates',
+        importance: Notifications.AndroidImportance.HIGH,
+      });
     }
 
     const projectId = getProjectId();
@@ -99,6 +109,10 @@ export async function subscribeForPush(): Promise<void> {
         platform: 'expo',
       }),
     });
+    if (!res.ok) {
+      const message = await res.text();
+      throw new Error(`Subscription API returned ${res.status}: ${message}`);
+    }
     // Don't log the token itself — it's a device credential and Hermes keeps
     // console.* output in release builds.
     console.log(`Push subscribe -> ${base}/subscribe returned ${res.status}`);
