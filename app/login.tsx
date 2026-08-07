@@ -30,12 +30,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 import Animated, {
-  SlideInLeft,
-  SlideInRight,
+  Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -49,7 +50,19 @@ const DEFAULT_AVATAR = require('@/assets/images/person.png');
 const LOGO_PATH =
   'M242-249q-20-11-31-29.5T200-320v-192l-96-53q-11-6-16-15t-5-20q0-11 5-20t16-15l338-184q9-5 18.5-7.5T480-829q10 0 19.5 2.5T518-819l381 208q10 5 15.5 14.5T920-576v256q0 17-11.5 28.5T880-280q-17 0-28.5-11.5T840-320v-236l-80 44v192q0 23-11 41.5T718-249L518-141q-9 5-18.5 7.5T480-131q-10 0-19.5-2.5T442-141L242-249Zm238-203 274-148-274-148-274 148 274 148Zm0 241 200-108v-151l-161 89q-9 5-19 7.5t-20 2.5q-10 0-20-2.5t-19-7.5l-161-89v151l200 108Zm0-241Zm0 121Zm0 0Z';
 
+// --- Step transition tuning --------------------------------------------------
+// Mirrors the web login wizard (gradexis-web/src/pages/Login.jsx), which uses
+// `AnimatePresence mode="wait"`: the outgoing step slides out *first*, then the
+// incoming one slides in from the opposite side. Running them in sequence is
+// what makes it read as one continuous horizontal move — a crossfade of the two
+// at once just looks like a snap. Same numbers as web: 320ms per phase, CSS
+// `ease`, 48px of travel, and a matching 320ms height transition.
+const STEP_EASING = Easing.bezier(0.25, 0.1, 0.25, 1); // CSS `ease`
 const STEP_DURATION = 320;
+const STEP_TIMING = { duration: STEP_DURATION, easing: STEP_EASING } as const;
+const STEP_SLIDE = 48;
+
+const PRESS_TIMING = { duration: 120, easing: Easing.out(Easing.quad) } as const;
 
 type LoginType = 'credentials' | 'classlink' | 'classlinkCredentials';
 type Step = 'entry' | 'district-list' | 'custom-platform' | 'custom-source' | 'form' | 'student-picker';
@@ -134,7 +147,12 @@ function DistrictRow({ district, onPress }: { district: District; onPress?: () =
 }
 
 /** A square, selectable card used by the Custom flow's platform/source grids.
- *  Takes either a lucide `icon` or an image `logo` — never both. */
+ *  Takes either a lucide `icon` or an image `logo` — never both.
+ *
+ *  Sizing note: the card fills its parent's width and derives its height from
+ *  `aspectRatio`. It deliberately does NOT use `flex-1` — the platform grid
+ *  puts each card inside a fixed-width (column) wrapper, where `flex-1` would
+ *  resolve against the *vertical* axis and collapse the tile to zero height. */
 function ChoiceCard({
   icon,
   logo,
@@ -146,21 +164,46 @@ function ChoiceCard({
   label: string;
   onPress: () => void;
 }) {
+  const pressed = useSharedValue(0);
+  const pressStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 - pressed.value * 0.05 }],
+  }));
+
   return (
-    <Pressable
-      onPress={onPress}
-      className="aspect-square flex-1 items-center justify-center gap-2 rounded-xl border border-black/15 bg-white/60 p-3 active:bg-white/90">
-      {logo ? (
-        <Image source={logo} style={{ width: 40, height: 40 }} resizeMode="contain" />
-      ) : (
-        icon && <Icon as={icon} className="text-black" size={30} />
-      )}
-      <Text className="text-center text-sm font-medium text-black" numberOfLines={2}>
-        {label}
-      </Text>
-    </Pressable>
+    <Animated.View style={pressStyle}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => {
+          pressed.value = withTiming(1, PRESS_TIMING);
+        }}
+        onPressOut={() => {
+          pressed.value = withTiming(0, PRESS_TIMING);
+        }}
+        style={{ width: '100%', aspectRatio: 1 }}
+        className="items-center justify-center gap-2 rounded-xl border border-black/15 bg-white/60 p-3 active:bg-white/90">
+        {logo ? (
+          <Image source={logo} style={{ width: 40, height: 40 }} resizeMode="contain" />
+        ) : (
+          icon && <Icon as={icon} className="text-black" size={30} />
+        )}
+        <Text className="text-center text-sm font-medium text-black" numberOfLines={2}>
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
+
+/** The wallpaper + blur. Memoised because the login screen re-renders on every
+ *  keystroke (search / username / password) and re-rendering a full-screen
+ *  BlurView on each one is what makes the animations stutter. */
+const Backdrop = React.memo(function Backdrop() {
+  return (
+    <ImageBackground source={WALLPAPER} resizeMode="cover" style={StyleSheet.absoluteFill}>
+      <BlurView intensity={40} tint="light" style={{ flex: 1 }} />
+    </ImageBackground>
+  );
+});
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -174,23 +217,68 @@ export default function LoginScreen() {
   const [reauthActive, setReauthActive] = React.useState(() => !!reauthUsername);
 
   // --- Wizard navigation -----------------------------------------------------
+  // `step` is the logical step: it changes the moment you tap, so history and
+  // every handler below reads the value the user just chose. `displayed` is what
+  // is actually on screen — it lags by one exit animation so the old content can
+  // slide out before the new content mounts. (Same split `AnimatePresence
+  // mode="wait"` does internally on web.)
   const [step, setStep] = React.useState<Step>(reauthActive ? 'form' : 'entry');
-  const [dir, setDir] = React.useState<1 | -1>(1);
+  const [displayed, setDisplayed] = React.useState<Step>(step);
   const historyRef = React.useRef<Step[]>([]);
 
-  const go = React.useCallback(
-    (next: Step) => {
-      historyRef.current.push(step);
-      setDir(1);
-      setStep(next);
-    },
-    [step]
-  );
-  const back = React.useCallback(() => {
-    const prev = historyRef.current.pop();
-    setDir(-1);
-    setStep(prev ?? 'entry');
-  }, []);
+  // Position of the displayed step: -1 = slid out to the trailing side,
+  // 0 = centred, +1 = parked on the leading side waiting to slide in. Driven by
+  // hand rather than by Reanimated's `entering`/`exiting`, whose builders are
+  // rebuilt on every render and re-fire the animation when unrelated state
+  // changes (the districts fetch resolving, a keystroke).
+  const anim = useSharedValue(0);
+  const dirSV = useSharedValue<1 | -1>(1);
+  const navId = React.useRef(0);
+
+  // These four are deliberately plain functions rather than `useCallback`s:
+  // nothing downstream is memoised on their identity, and the compiler forbids
+  // mutating a shared value that an earlier hook already captured.
+
+  // Runs once the outgoing step has finished sliding out. Parking `anim` at +1
+  // *before* swapping the content is what stops the new step painting centred
+  // for one frame — that single frame is what looked like a snap.
+  const showStep = (next: Step, id: number) => {
+    if (id !== navId.current) return; // superseded by a newer navigation
+    anim.value = 1;
+    setDisplayed(next);
+  };
+
+  const navigate = (next: Step, direction: 1 | -1) => {
+    if (next === step) return;
+    const id = ++navId.current;
+    dirSV.value = direction;
+    setStep(next);
+    anim.value = withTiming(-1, STEP_TIMING, (finished) => {
+      if (finished) runOnJS(showStep)(next, id);
+    });
+  };
+
+  const go = (next: Step) => {
+    historyRef.current.push(step);
+    navigate(next, 1);
+  };
+  const back = () => navigate(historyRef.current.pop() ?? 'entry', -1);
+
+  // Slide the newly displayed step in. Skipped on the very first mount so the
+  // card doesn't fly in on a cold start (web passes `initial={false}`).
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    anim.value = withTiming(0, STEP_TIMING);
+  }, [displayed, anim]);
+
+  const stepStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.abs(anim.value),
+    transform: [{ translateX: anim.value * dirSV.value * STEP_SLIDE }],
+  }));
 
   // --- Selection / form state ------------------------------------------------
   const [platform, setPlatform] = React.useState<(typeof PLATFORMS)[number]>(
@@ -288,22 +376,45 @@ export default function LoginScreen() {
   }, []);
 
   // --- Animated card height (adapts to the active step) ----------------------
+  // A single writer (`retarget`) owns `cardHeight`. The previous code had both
+  // the layout callback and a step effect writing it, and compared measured
+  // heights with `===` — sub-pixel differences between layout passes then
+  // restarted the timing animation over and over, which read as jitter.
   const cardHeight = useSharedValue(0);
   const heights = React.useRef<Record<string, number>>({});
+  const targetHeight = React.useRef(0);
 
-  const onMeasure = (s: Step, h: number) => {
-    if (!h || heights.current[s] === h) return;
-    heights.current[s] = h;
-    if (s === step) {
+  const retarget = React.useCallback(
+    (h: number) => {
+      if (!h || Math.abs(targetHeight.current - h) < 0.5) return;
+      targetHeight.current = h;
+      // First measurement has nothing to animate from — snap.
       if (cardHeight.value === 0) cardHeight.value = h;
-      else cardHeight.value = withTiming(h, { duration: STEP_DURATION });
-    }
-  };
+      else cardHeight.value = withTiming(h, STEP_TIMING);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
+  // Measured off the step's own content, whose height is never constrained by
+  // the animated container, so this is always the true content height. Web gets
+  // the same signal from a ResizeObserver on the step node.
+  const onMeasure = React.useCallback(
+    (s: Step, h: number) => {
+      if (!h) return;
+      heights.current[s] = h;
+      retarget(h);
+    },
+    [retarget]
+  );
+
+  // Start moving toward a known height on the same frame the new step mounts, so
+  // the container doesn't clip it while waiting for its layout pass.
+  // `retarget`'s guard makes the subsequent onLayout a no-op.
   React.useEffect(() => {
-    const h = heights.current[step];
-    if (h) cardHeight.value = withTiming(h, { duration: STEP_DURATION });
-  }, [step, cardHeight]);
+    const h = heights.current[displayed];
+    if (h) retarget(h);
+  }, [displayed, retarget]);
 
   const heightStyle = useAnimatedStyle(() =>
     cardHeight.value > 0 ? { height: cardHeight.value } : {}
@@ -342,7 +453,9 @@ export default function LoginScreen() {
     });
     setLoginTitles(d.loginTitles ?? {});
     go('form');
-    setTimeout(() => setSearch(''), STEP_DURATION);
+    // Clear the query only once the list is off screen — a step change is now
+    // two phases (slide out, then slide in), so it stays mounted for both.
+    setTimeout(() => setSearch(''), STEP_DURATION * 2);
   };
 
   // Switch the active credential form between the offered methods (fixing the
@@ -645,6 +758,12 @@ export default function LoginScreen() {
             keyExtractor={(d) => d.link + d.name}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            // The full district list is long; rendering it all on mount blocks
+            // the JS thread right as the step transition starts.
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            removeClippedSubviews={Platform.OS === 'android'}
             ItemSeparatorComponent={() => <View className="h-2" />}
             renderItem={({ item }) => (
               <DistrictRow district={item} onPress={() => selectDistrict(item)} />
@@ -720,9 +839,18 @@ export default function LoginScreen() {
   const renderCustomSource = () => (
     <View className="gap-3">
       <Text className="text-center text-sm font-medium text-black">Choose your login source</Text>
+      {/* ChoiceCard fills its parent's width, so the row splits the width here. */}
       <View className="flex-row gap-3">
-        <ChoiceCard icon={KeyRound} label="Credentials" onPress={() => pickSource('credentials')} />
-        <ChoiceCard logo={CLASSLINK_LOGO} label="ClassLink" onPress={() => pickSource('classlink')} />
+        <View className="flex-1">
+          <ChoiceCard icon={KeyRound} label="Credentials" onPress={() => pickSource('credentials')} />
+        </View>
+        <View className="flex-1">
+          <ChoiceCard
+            logo={CLASSLINK_LOGO}
+            label="ClassLink"
+            onPress={() => pickSource('classlink')}
+          />
+        </View>
       </View>
       <Button variant="outline" className="w-full" style={WHITE_BUTTON} onPress={back}>
         <Text className="text-black">Back</Text>
@@ -938,8 +1066,8 @@ export default function LoginScreen() {
     </View>
   );
 
-  const renderStep = () => {
-    switch (step) {
+  const renderStep = (s: Step) => {
+    switch (s) {
       case 'entry':
         return renderEntry();
       case 'district-list':
@@ -957,12 +1085,7 @@ export default function LoginScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <ImageBackground
-        source={WALLPAPER}
-        resizeMode="cover"
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-        <BlurView intensity={40} tint="light" style={{ flex: 1 }} />
-      </ImageBackground>
+      <Backdrop />
       <StatusBar style="dark" />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -976,18 +1099,23 @@ export default function LoginScreen() {
               <Logo />
             </View>
 
-            <View className="mt-6 w-full overflow-hidden">
-              <Animated.View style={heightStyle} className="w-full">
-                {/* Only the active step is mounted (keyed), so a jump between
-                    non-adjacent steps never renders the ones in between. The
-                    entering animation slides the new step in from the side the
-                    navigation is heading. */}
-                <Animated.View
-                  key={step}
-                  entering={(dir === 1 ? SlideInRight : SlideInLeft).duration(STEP_DURATION)}
-                  onLayout={(e) => onMeasure(step, e.nativeEvent.layout.height)}
-                  style={{ width: '100%' }}>
-                  {renderStep()}
+            <View className="mt-6 w-full">
+              {/* Animated height container. Only one step is ever mounted: the
+                  outgoing one slides out, and only then is it swapped for the
+                  incoming one, which slides in from the opposite side. */}
+              <Animated.View style={[heightStyle, { width: '100%', overflow: 'hidden' }]}>
+                {/* The sliding wrapper is never keyed, so it stays mounted for
+                    the life of the screen and the UI thread drives it without
+                    interruption. Only the plain View inside is keyed/remounted
+                    to swap step content — a remounted *animated* view can paint
+                    one frame from its stale initial style, which is the flash
+                    that reads as a snap. */}
+                <Animated.View style={[stepStyle, { width: '100%' }]}>
+                  <View
+                    key={displayed}
+                    onLayout={(e) => onMeasure(displayed, e.nativeEvent.layout.height)}>
+                    {renderStep(displayed)}
+                  </View>
                 </Animated.View>
               </Animated.View>
             </View>
