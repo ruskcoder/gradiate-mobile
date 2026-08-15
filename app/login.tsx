@@ -51,18 +51,40 @@ const LOGO_PATH =
   'M242-249q-20-11-31-29.5T200-320v-192l-96-53q-11-6-16-15t-5-20q0-11 5-20t16-15l338-184q9-5 18.5-7.5T480-829q10 0 19.5 2.5T518-819l381 208q10 5 15.5 14.5T920-576v256q0 17-11.5 28.5T880-280q-17 0-28.5-11.5T840-320v-236l-80 44v192q0 23-11 41.5T718-249L518-141q-9 5-18.5 7.5T480-131q-10 0-19.5-2.5T442-141L242-249Zm238-203 274-148-274-148-274 148 274 148Zm0 241 200-108v-151l-161 89q-9 5-19 7.5t-20 2.5q-10 0-20-2.5t-19-7.5l-161-89v151l200 108Zm0-241Zm0 121Zm0 0Z';
 
 // --- Step transition tuning --------------------------------------------------
-// Mirrors the web login wizard (gradexis-web/src/pages/Login.jsx), which uses
-// `AnimatePresence mode="wait"`: the outgoing step slides out *first*, then the
-// incoming one slides in from the opposite side. Running them in sequence is
-// what makes it read as one continuous horizontal move — a crossfade of the two
-// at once just looks like a snap. Same numbers as web: 320ms per phase, CSS
-// `ease`, 48px of travel, and a matching 320ms height transition.
-const STEP_EASING = Easing.bezier(0.25, 0.1, 0.25, 1); // CSS `ease`
-const STEP_DURATION = 320;
+// Steps slide like a filmstrip: the outgoing step and the incoming step are both
+// fully opaque and sit exactly one viewport-width apart, then move together as a
+// single unit. No fade — you should see the next page arrive, not dissolve in.
+//
+// The wizard branches rather than running in a straight line, so there is no
+// fixed strip to scroll along. Instead only two panes are ever mounted and the
+// incoming one is *placed* a full width away on the side we're travelling from
+// (right when going forward, left when going back), which gives the same
+// in-line feel for any pair of steps.
+//
+// Decisive start with a long soft settle — the travel is now a whole page width,
+// so it needs a touch longer than the web's 320ms nudge to stay readable.
+const STEP_EASING = Easing.bezier(0.32, 0.72, 0, 1);
+const STEP_DURATION = 380;
 const STEP_TIMING = { duration: STEP_DURATION, easing: STEP_EASING } as const;
-const STEP_SLIDE = 48;
 
 const PRESS_TIMING = { duration: 120, easing: Easing.out(Easing.quad) } as const;
+
+/** Where a pane sits along the strip. The incoming page closes a full-width gap
+ *  on the side we're travelling from; the outgoing page opens the same gap on
+ *  the opposite side, so the pair never overlaps and never leaves a seam. */
+function paneOffset(incoming: boolean, progress: number, dir: number, width: number) {
+  'worklet';
+  return incoming ? (1 - progress) * dir * width : -progress * dir * width;
+}
+
+const paneStyles = StyleSheet.create({
+  // The current page is in normal flow, so it alone drives the measured height.
+  current: { width: '100%' },
+  // The page sliding away shares the current page's origin (they're separated
+  // purely by their transforms) and is taken out of flow so it can't affect
+  // the height the container is animating toward.
+  leaving: { position: 'absolute', top: 0, left: 0, right: 0 },
+});
 
 type LoginType = 'credentials' | 'classlink' | 'classlinkCredentials';
 type Step = 'entry' | 'district-list' | 'custom-platform' | 'custom-source' | 'form' | 'student-picker';
@@ -217,45 +239,57 @@ export default function LoginScreen() {
   const [reauthActive, setReauthActive] = React.useState(() => !!reauthUsername);
 
   // --- Wizard navigation -----------------------------------------------------
-  // `step` is the logical step: it changes the moment you tap, so history and
-  // every handler below reads the value the user just chose. `displayed` is what
-  // is actually on screen — it lags by one exit animation so the old content can
-  // slide out before the new content mounts. (Same split `AnimatePresence
-  // mode="wait"` does internally on web.)
   const [step, setStep] = React.useState<Step>(reauthActive ? 'form' : 'entry');
-  const [displayed, setDisplayed] = React.useState<Step>(step);
   const historyRef = React.useRef<Step[]>([]);
 
-  // Position of the displayed step: -1 = slid out to the trailing side,
-  // 0 = centred, +1 = parked on the leading side waiting to slide in. Driven by
+  // The step sliding away. It stays mounted (and non-interactive) until the
+  // slide finishes, so both pages are on screen for the whole travel.
+  const [prevStep, setPrevStep] = React.useState<Step | null>(null);
+  const navId = React.useRef(0);
+
+  // There are exactly two panes, and which one holds the current step alternates
+  // with every navigation. That alternation is the point: it keeps each pane at
+  // a fixed position in the tree, so the page sliding out keeps the component
+  // instances it already had. Re-parenting it instead would remount its content
+  // — the district FlatList would snap back to the top mid-slide, in full view,
+  // and pay for a fresh mount exactly as the animation starts.
+  const [active, setActive] = React.useState<0 | 1>(0);
+  const activeSV = useSharedValue<0 | 1>(0);
+
+  // 0 = the incoming page is a full width away, 1 = it has arrived. Driven by
   // hand rather than by Reanimated's `entering`/`exiting`, whose builders are
   // rebuilt on every render and re-fire the animation when unrelated state
   // changes (the districts fetch resolving, a keystroke).
-  const anim = useSharedValue(0);
+  const progress = useSharedValue(1);
   const dirSV = useSharedValue<1 | -1>(1);
-  const navId = React.useRef(0);
+  // Travel distance = the viewport's own width, so the two pages sit edge to
+  // edge with no gap and no overlap.
+  const viewportW = useSharedValue(0);
 
-  // These four are deliberately plain functions rather than `useCallback`s:
-  // nothing downstream is memoised on their identity, and the compiler forbids
-  // mutating a shared value that an earlier hook already captured.
+  // Plain functions, not `useCallback`s: nothing downstream is memoised on their
+  // identity, and the compiler forbids mutating a shared value that an earlier
+  // hook already captured — so every shared-value write has to sit above the
+  // `useAnimatedStyle` calls that read it.
+  const onViewportLayout = (e: { nativeEvent: { layout: { width: number } } }) => {
+    viewportW.value = e.nativeEvent.layout.width;
+  };
 
-  // Runs once the outgoing step has finished sliding out. Parking `anim` at +1
-  // *before* swapping the content is what stops the new step painting centred
-  // for one frame — that single frame is what looked like a snap.
-  const showStep = (next: Step, id: number) => {
-    if (id !== navId.current) return; // superseded by a newer navigation
-    anim.value = 1;
-    setDisplayed(next);
+  const endNav = (id: number) => {
+    if (id === navId.current) setPrevStep(null);
   };
 
   const navigate = (next: Step, direction: 1 | -1) => {
     if (next === step) return;
-    const id = ++navId.current;
+    const nextActive: 0 | 1 = active === 0 ? 1 : 0;
+    navId.current += 1;
     dirSV.value = direction;
+    activeSV.value = nextActive;
+    // Park the incoming page off screen *before* React commits it, so it never
+    // paints a frame in its final position — that frame is what reads as a snap.
+    progress.value = 0;
+    setPrevStep(step);
+    setActive(nextActive);
     setStep(next);
-    anim.value = withTiming(-1, STEP_TIMING, (finished) => {
-      if (finished) runOnJS(showStep)(next, id);
-    });
   };
 
   const go = (next: Step) => {
@@ -264,21 +298,52 @@ export default function LoginScreen() {
   };
   const back = () => navigate(historyRef.current.pop() ?? 'entry', -1);
 
-  // Slide the newly displayed step in. Skipped on the very first mount so the
-  // card doesn't fly in on a cold start (web passes `initial={false}`).
+  // Start the slide only once the new page has actually been committed, so the
+  // travel always begins from a correctly-positioned first frame. Skipped on the
+  // initial mount, which has nothing to slide in from.
   const mountedRef = React.useRef(false);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
       return;
     }
-    anim.value = withTiming(0, STEP_TIMING);
-  }, [displayed, anim]);
+    const id = navId.current;
+    progress.value = withTiming(1, STEP_TIMING, (finished) => {
+      if (finished) runOnJS(endNav)(id);
+    });
+  }, [step, progress]);
 
-  const stepStyle = useAnimatedStyle(() => ({
-    opacity: 1 - Math.abs(anim.value),
-    transform: [{ translateX: anim.value * dirSV.value * STEP_SLIDE }],
+  // Both panes share one progress value, so they move as a single strip: the
+  // incoming page closes its full-width gap while the outgoing page opens the
+  // same gap on the other side. Opacity is deliberately untouched — this is a
+  // translate, not a crossfade.
+  const pane0Style = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX: paneOffset(
+          activeSV.value === 0,
+          progress.value,
+          dirSV.value,
+          viewportW.value
+        ),
+      },
+    ],
   }));
+  const pane1Style = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX: paneOffset(
+          activeSV.value === 1,
+          progress.value,
+          dirSV.value,
+          viewportW.value
+        ),
+      },
+    ],
+  }));
+
+  const slot0 = active === 0 ? step : prevStep;
+  const slot1 = active === 1 ? step : prevStep;
 
   // --- Selection / form state ------------------------------------------------
   const [platform, setPlatform] = React.useState<(typeof PLATFORMS)[number]>(
@@ -396,25 +461,24 @@ export default function LoginScreen() {
     []
   );
 
-  // Measured off the step's own content, whose height is never constrained by
-  // the animated container, so this is always the true content height. Web gets
-  // the same signal from a ResizeObserver on the step node.
-  const onMeasure = React.useCallback(
-    (s: Step, h: number) => {
-      if (!h) return;
-      heights.current[s] = h;
-      retarget(h);
-    },
-    [retarget]
-  );
+  // Measured off each pane's own content, which the animated container never
+  // constrains, so this is always the true content height. Web gets the same
+  // signal from a ResizeObserver on the step node. Only the *current* step may
+  // move the container — the page sliding away reports its height too, and
+  // acting on it would drag the height back to where it came from.
+  const onMeasure = (s: Step, h: number) => {
+    if (!h) return;
+    heights.current[s] = h;
+    if (s === step) retarget(h);
+  };
 
   // Start moving toward a known height on the same frame the new step mounts, so
   // the container doesn't clip it while waiting for its layout pass.
   // `retarget`'s guard makes the subsequent onLayout a no-op.
   React.useEffect(() => {
-    const h = heights.current[displayed];
+    const h = heights.current[step];
     if (h) retarget(h);
-  }, [displayed, retarget]);
+  }, [step, retarget]);
 
   const heightStyle = useAnimatedStyle(() =>
     cardHeight.value > 0 ? { height: cardHeight.value } : {}
@@ -453,9 +517,9 @@ export default function LoginScreen() {
     });
     setLoginTitles(d.loginTitles ?? {});
     go('form');
-    // Clear the query only once the list is off screen — a step change is now
-    // two phases (slide out, then slide in), so it stays mounted for both.
-    setTimeout(() => setSearch(''), STEP_DURATION * 2);
+    // Clear the query only once the list has slid off screen — it stays mounted
+    // as the outgoing page for the whole travel.
+    setTimeout(() => setSearch(''), STEP_DURATION);
   };
 
   // Switch the active credential form between the offered methods (fixing the
@@ -1099,23 +1163,37 @@ export default function LoginScreen() {
               <Logo />
             </View>
 
-            <View className="mt-6 w-full">
-              {/* Animated height container. Only one step is ever mounted: the
-                  outgoing one slides out, and only then is it swapped for the
-                  incoming one, which slides in from the opposite side. */}
+            <View className="mt-6 w-full" onLayout={onViewportLayout}>
+              {/* Animated height container, clipping the strip either side.
+                  The two panes below are unkeyed and stay mounted for the life
+                  of the screen, so the UI thread drives them without
+                  interruption and neither ever paints a frame from a stale
+                  initial style. Which one is current alternates per navigation;
+                  only the plain Views inside are keyed, so a page keeps its
+                  component instances while it slides away. */}
               <Animated.View style={[heightStyle, { width: '100%', overflow: 'hidden' }]}>
-                {/* The sliding wrapper is never keyed, so it stays mounted for
-                    the life of the screen and the UI thread drives it without
-                    interruption. Only the plain View inside is keyed/remounted
-                    to swap step content — a remounted *animated* view can paint
-                    one frame from its stale initial style, which is the flash
-                    that reads as a snap. */}
-                <Animated.View style={[stepStyle, { width: '100%' }]}>
-                  <View
-                    key={displayed}
-                    onLayout={(e) => onMeasure(displayed, e.nativeEvent.layout.height)}>
-                    {renderStep(displayed)}
-                  </View>
+                <Animated.View
+                  pointerEvents={active === 0 ? 'auto' : 'none'}
+                  style={[pane0Style, active === 0 ? paneStyles.current : paneStyles.leaving]}>
+                  {slot0 && (
+                    <View
+                      key={slot0}
+                      onLayout={(e) => onMeasure(slot0, e.nativeEvent.layout.height)}>
+                      {renderStep(slot0)}
+                    </View>
+                  )}
+                </Animated.View>
+
+                <Animated.View
+                  pointerEvents={active === 1 ? 'auto' : 'none'}
+                  style={[pane1Style, active === 1 ? paneStyles.current : paneStyles.leaving]}>
+                  {slot1 && (
+                    <View
+                      key={slot1}
+                      onLayout={(e) => onMeasure(slot1, e.nativeEvent.layout.height)}>
+                      {renderStep(slot1)}
+                    </View>
+                  )}
                 </Animated.View>
               </Animated.View>
             </View>
