@@ -38,6 +38,9 @@ yarn-error.*
 android/
 ios/
 
+builds/
+cs.ps1
+
 expo-env.d.ts
 
 .vscode
