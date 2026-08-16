@@ -1,5 +1,6 @@
 import { currentUser, hydrateSecureCredentials, useStore } from '@/lib/store';
 import { getClasses } from '@/lib/grades-api';
+import { loadBaseline } from '@/lib/notification-baseline';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
@@ -74,13 +75,13 @@ export async function checkGradesAndNotify(): Promise<boolean> {
     return false;
   }
 
-  // Snapshot prior per-term averages up front. `history` is keyed
-  // term -> courseKey -> [snapshots]; the last snapshot is the previous value.
-  const historyBefore: any = useStore.getState().getGradesStore().history || {};
-  const prevAverage = (term: string, key: string) => {
-    const snaps = historyBefore?.[term]?.[key];
-    return Array.isArray(snaps) && snaps.length ? snaps[snaps.length - 1].average : undefined;
-  };
+  // Snapshot prior per-term averages up front, from the PERSISTED baseline.
+  // This used to read `gradesStore.history`, which lives only in memory — so a
+  // headless background wake (the whole point of the push trigger) always saw an
+  // empty history and skipped every class as "previously blank". Reading it here
+  // is safe against the write inside `getClasses` below, which happens after.
+  const baselineBefore = await loadBaseline();
+  const prevAverage = (term: string, key: string) => baselineBefore?.[term]?.[key];
 
   // Don't notify off a stale cached snapshot — force a live fetch.
   useStore.getState().clearCache();
@@ -106,6 +107,14 @@ export async function checkGradesAndNotify(): Promise<boolean> {
   }
   const multi = currentTerms.length > 1;
 
+  // This whole check runs headless and invisibly, so when it decides NOT to
+  // notify there is otherwise no way to tell why. Logged via console so it lands
+  // in `adb logcat -s ReactNativeJS:V` (Hermes keeps console output in release).
+  console.log(
+    `[grades-check] terms=${JSON.stringify(currentTerms)} classes=${chunk.classes.length} ` +
+    `baselineTerms=${JSON.stringify(Object.keys(baselineBefore))}`
+  );
+
   let changed = false;
   for (const term of currentTerms) {
     for (const course of chunk.classes) {
@@ -120,9 +129,13 @@ export async function checkGradesAndNotify(): Promise<boolean> {
             : undefined;
       const oldAverage = prevAverage(term, key);
 
-      if (isBlankGrade(oldAverage) || isBlankGrade(newAverage)) continue;
+      if (isBlankGrade(oldAverage) || isBlankGrade(newAverage)) {
+        console.log(`[grades-check] skip ${key} @${term}: old=${oldAverage} new=${newAverage} (blank)`);
+        continue;
+      }
       if (String(oldAverage) === String(newAverage)) continue;
 
+      console.log(`[grades-check] CHANGED ${key} @${term}: ${oldAverage} -> ${newAverage}`);
       changed = true;
       await Notifications.scheduleNotificationAsync({
         content: {

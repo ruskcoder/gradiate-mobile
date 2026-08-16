@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gradiate",
     "slug": "gradiate",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gradiate",
@@ -24,7 +24,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#93CEFF"
       },
-      "versionCode": 19,
+      "versionCode": 20,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ],
@@ -63,7 +63,9 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-secure-store",
-      "expo-status-bar"
+      "expo-status-bar",
+      "./plugins/withReleaseSigning",
+      "./plugins/withJcenterFix"
     ],
     "experiments": {
       "typedRoutes": true

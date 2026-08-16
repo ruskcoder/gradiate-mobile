@@ -734,7 +734,32 @@ useStore.subscribe((state) => {
  * Worst case if a password is missing everywhere: the user is asked to log in
  * again — never a hard lockout.
  */
-export async function hydrateSecureCredentials(): Promise<void> {
+// The in-flight keystore read, so callers can wait for it. Store rehydration
+// (`useStore.persist.hasHydrated()`) completes as soon as the AsyncStorage blob
+// is merged, but passwords live in the OS keystore and arrive strictly later —
+// see whenSecureCredentialsReady().
+let secureHydration: Promise<void> | null = null;
+
+/**
+ * Resolves once the keystore read started at rehydration has finished.
+ *
+ * `hasHydrated()` is NOT sufficient to know a password is in memory: it fires
+ * after the plaintext blob merges, while `hydrateSecureCredentials()` is still
+ * awaiting the keystore. Screens that mounted in that window fired a request
+ * with `password: undefined`, the API answered 400 "username and password are
+ * required for credentials login", and the app read that as a dead password and
+ * bounced the user to re-login — intermittently, because it's a race.
+ */
+export function whenSecureCredentialsReady(): Promise<void> {
+  return secureHydration ?? Promise.resolve();
+}
+
+export function hydrateSecureCredentials(): Promise<void> {
+  secureHydration = doHydrateSecureCredentials();
+  return secureHydration;
+}
+
+async function doHydrateSecureCredentials(): Promise<void> {
   const users = useStore.getState().users;
   if (users.length === 0) return;
 

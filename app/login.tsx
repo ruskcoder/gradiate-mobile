@@ -24,6 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { KeyRound } from 'lucide-react-native';
 import * as React from 'react';
 import {
+  BackHandler,
   FlatList,
   Image,
   ImageBackground,
@@ -414,11 +415,14 @@ export default function LoginScreen() {
   const [mfaLoading, setMfaLoading] = React.useState(false);
   const [mfaError, setMfaError] = React.useState<string | null>(null);
 
-  const cancelReauth = React.useCallback(() => {
-    setReauthActive(false);
-    setReauthRequired(null);
-    setUsername('');
-  }, [setReauthRequired]);
+  // Swallow Android's hardware/gesture back for as long as the re-login is
+  // pending. Hiding the on-screen Back button alone still leaves the system
+  // gesture, which would drop the user onto a signed-out app behind this screen.
+  React.useEffect(() => {
+    if (!reauthActive) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, [reauthActive]);
 
   React.useEffect(() => {
     (async () => {
@@ -1053,16 +1057,18 @@ export default function LoginScreen() {
       )}
 
       <View className="mt-1 flex-row items-center gap-2">
-        <Button
-          variant="outline"
-          style={[WHITE_BUTTON, loading && { opacity: 0.5 }]}
-          disabled={loading}
-          onPress={() => {
-            if (reauthActive) cancelReauth();
-            back();
-          }}>
-          <Text className="text-black">Back</Text>
-        </Button>
+        {/* No way back out of a re-login: there is nothing behind it. The user
+            got here because their session died, so the wizard has no history to
+            pop, and leaving would strand them on a signed-out app. */}
+        {!reauthActive && (
+          <Button
+            variant="outline"
+            style={[WHITE_BUTTON, loading && { opacity: 0.5 }]}
+            disabled={loading}
+            onPress={back}>
+            <Text className="text-black">Back</Text>
+          </Button>
+        )}
         {showCredForm && (
           <Button className="flex-1 flex-row gap-2" disabled={!canSubmit} onPress={() => doLogin()}>
             {loading && <Spinner size="small" color={spinnerColor} />}

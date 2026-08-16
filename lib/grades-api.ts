@@ -18,7 +18,14 @@ import {
   TRANSCRIPT_ENDPOINT,
 } from '@/lib/constants';
 import { addGradesLoad, initializeGradesStore } from '@/lib/grades-store';
-import { currentUser, getSession, setSession, useStore } from '@/lib/store';
+import { mergeBaseline } from '@/lib/notification-baseline';
+import {
+  currentUser,
+  getSession,
+  setSession,
+  useStore,
+  whenSecureCredentialsReady,
+} from '@/lib/store';
 import { pathMerge } from '@/lib/utils';
 
 type Platform = (typeof PLATFORMS)[number];
@@ -43,6 +50,23 @@ function getCachedValue(key: string): any {
   return useStore.getState().getCacheValue(key);
 }
 
+/**
+ * Return the current user, first waiting for the keystore if this account signs
+ * in with a password that hasn't arrived in memory yet.
+ *
+ * Store rehydration finishes before the keystore read does, so a screen can
+ * mount and fetch during that gap. Sending `password: undefined` makes the API
+ * reject the request, so wait for the read and re-read the user afterwards —
+ * hydration replaces the object rather than mutating it.
+ */
+async function userWithCredentials() {
+  const user = currentUser();
+  if (!user) return null;
+  if (user.loginType !== 'credentials' || user.password) return user;
+  await whenSecureCredentialsReady();
+  return currentUser() ?? user;
+}
+
 function setCachedValue(key: string, value: any): void {
   useStore.getState().setCacheValue(key, value);
 }
@@ -54,20 +78,18 @@ function setCachedValue(key: string, value: any): void {
  * the caller's own catch block can still surface the message inline.
  */
 function handleAuthError(response: Response, data: any): void {
-  const msg: string = data?.message || '';
-  const isAuthError =
-    response.status === 401 ||
-    // A data call that comes back needing a fresh ClassLink 2FA answer (the
-    // stored one stopped working, or none is stored) can't be resolved inline —
-    // send the user back to the login screen to re-verify.
-    data?.mfaRequired === true ||
-    msg.includes('Invalid') ||
-    msg.includes('password') ||
-    msg.includes('Session') ||
-    msg.includes('PIN') ||
-    msg.includes('image') ||
-    msg.includes('two-factor') ||
-    msg.includes('ClassLink');
+  // Prefer the status code. Streaming responses flush 200 headers before the
+  // error is known, so the code also travels in the body as `data.status`.
+  const status: number = data?.status ?? response.status ?? 0;
+
+  // Only ever treat a real 401 (or a pending second factor) as "your credentials
+  // stopped working". This used to substring-match the message for 'password',
+  // 'Invalid', 'Session'... which also matched ordinary 400s — above all
+  // "username and password are required for credentials login", the error the
+  // API returns when a request goes out before the keystore has handed the
+  // password back. That turned a transient startup race into "your password or
+  // 2FA has changed", which is why it appeared at random and vanished on relaunch.
+  const isAuthError = status === 401 || data?.mfaRequired === true;
 
   if (isAuthError) {
     const user = currentUser();
@@ -321,7 +343,7 @@ async function fetchEndpoint(
     freshLogin = false,
   }: { options?: Record<string, any>; forceRefresh?: boolean; freshLogin?: boolean } = {}
 ) {
-  const user = currentUser();
+  const user = await userWithCredentials();
   if (!user) {
     throw new Error('No user logged in');
   }
@@ -386,7 +408,7 @@ export function getAttendance(date?: string) {
 }
 
 export async function* getClasses(term?: string) {
-  const user = currentUser();
+  const user = await userWithCredentials();
   const session = getSession();
   if (!user) {
     throw new Error('No user logged in');
@@ -420,10 +442,17 @@ export async function* getClasses(term?: string) {
 
   const endpoint = pathMerge(API_URL, API_PLATFORM_ENDPOINTS[user.platform], CLASSES_ENDPOINT);
 
-  function handleParsedChunk(data: any) {
+  async function handleParsedChunk(data: any) {
     if (data.success === true) {
       if (data.session) setSession(data.session);
       setCachedValue(cacheKey, data);
+      // Record what we've now seen, so the next grade check — which may run in a
+      // fresh process after this one is gone — has something to diff against.
+      // AWAITED, not fire-and-forget: in a headless push wake, React Native is
+      // torn down a couple of seconds after the task returns and drops anything
+      // still queued ("Tried to enqueue runnable on already finished thread"),
+      // which would silently lose the write and leave the baseline stale.
+      await mergeBaseline(data);
 
       if (term) {
         addGradesLoad(term, data.classes);
@@ -457,7 +486,7 @@ export async function* getClasses(term?: string) {
       }
 
       if (data.success === true) {
-        yield handleParsedChunk(data);
+        yield await handleParsedChunk(data);
         return;
       }
     }
