@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gradiate",
     "slug": "gradiate",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gradiate",
@@ -24,7 +24,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#93CEFF"
       },
-      "versionCode": 20,
+      "versionCode": 21,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ],
