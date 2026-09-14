@@ -54,7 +54,11 @@ import {
   Share2,
   Copy,
   ClipboardPaste,
+  Eraser,
+  Home,
+  Trash2,
 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { buildBackup, restoreBackup } from '~/lib/backup';
 import { syncMissingTodos } from '~/lib/grade-alerts';
@@ -236,6 +240,41 @@ export default function SettingsScreen() {
             } catch (e) {
               Alert.alert('Could not restore', e instanceof Error ? e.message : String(e));
             }
+          },
+        },
+      ]
+    );
+  }
+
+  const defaultPage = user?.defaultPage ?? 'grades';
+  const DEFAULT_PAGE_OPTIONS: { value: 'dashboard' | 'grades'; label: string }[] = [
+    { value: 'dashboard', label: 'Dashboard' },
+    { value: 'grades', label: 'Grades' },
+  ];
+
+  function confirmClearHistory() {
+    Alert.alert('Clear grades history?', 'This permanently deletes all stored grades history on this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => useStore.getState().clearGradesStore() },
+    ]);
+  }
+
+  function confirmWipeDevice() {
+    Alert.alert(
+      'Remove all data from this device?',
+      'Signs out every account and deletes saved passwords, grade history, to-dos and settings. Export a backup first if you want to keep them.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove everything',
+          style: 'destructive',
+          onPress: async () => {
+            const state = useStore.getState();
+            // removeUser also deletes each account's keystore credentials.
+            for (let i = state.users.length - 1; i >= 0; i--) useStore.getState().removeUser(i);
+            useStore.getState().setCurrentUserIndex(-1);
+            await AsyncStorage.clear();
+            router.replace('/login');
           },
         },
       ]
@@ -515,6 +554,30 @@ export default function SettingsScreen() {
         {/* Grades & data */}
         <SettingsSection title='Grades & Data'>
           <SettingsRow
+            icon={<Icon as={Home} className='size-4 text-primary' />}
+            label='Default page'
+            right={
+              <Select
+                value={{
+                  value: defaultPage,
+                  label: DEFAULT_PAGE_OPTIONS.find((o) => o.value === defaultPage)?.label ?? 'Grades',
+                }}
+                onValueChange={(option) =>
+                  option && changeUserData('defaultPage', option.value as 'dashboard' | 'grades')
+                }
+              >
+                <SelectTrigger className='w-32'>
+                  <SelectValue placeholder='Page' className='text-sm text-foreground' />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEFAULT_PAGE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value} label={option.label} />
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
             icon={<Icon as={Sparkles} className='size-4 text-primary' />}
             label='Show grade change banner'
             onPress={() => changeUserData('changeAlerts', !changeAlerts)}
@@ -548,6 +611,18 @@ export default function SettingsScreen() {
             icon={<Icon as={ClipboardPaste} className='size-4 text-primary' />}
             label='Restore backup from clipboard'
             onPress={restoreFromClipboard}
+          />
+          <SettingsRow
+            icon={<Icon as={Eraser} className='size-4 text-destructive' />}
+            label='Clear grades history'
+            destructive
+            onPress={confirmClearHistory}
+          />
+          <SettingsRow
+            icon={<Icon as={Trash2} className='size-4 text-destructive' />}
+            label='Remove all data from this device'
+            destructive
+            onPress={confirmWipeDevice}
           />
         </SettingsSection>
 

@@ -113,7 +113,7 @@ export default function CalculatorsScreen() {
               <ListItem
                 squareText={<Icon as={LayoutDashboard} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
                 squareColor=""
-                title="Overview"
+                title="Dashboard"
                 desc="GPA projection, bell schedule, goals and to-dos"
                 onPress={() => router.push('/insights/overview' as any)}
               />

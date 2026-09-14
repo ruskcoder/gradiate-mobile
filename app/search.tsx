@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // History…) need a class picked first, so they're reached through a class.
 const PAGES = [
   { title: 'Grades', href: '/grades' },
-  { title: 'Overview', href: '/insights/overview' },
+  { title: 'Dashboard', href: '/insights/overview' },
   { title: 'Missing Work', href: '/insights/missing' },
   { title: 'Attendance', href: '/academics/attendance' },
   { title: 'Schedules', href: '/academics/schedules' },

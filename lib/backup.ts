@@ -27,6 +27,8 @@ const PORTABLE_KEYS: (keyof User)[] = [
   'classNotes',
   'autoTodoFromMissing',
   'activeBellSchedule',
+  'changeAlerts',
+  'defaultPage',
   'gradesStore',
 ];
 

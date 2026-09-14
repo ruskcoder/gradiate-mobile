@@ -1,4 +1,4 @@
-import { useStore } from '@/lib/store';
+import { homePath, useStore } from '@/lib/store';
 import { Redirect } from 'expo-router';
 import * as React from 'react';
 
@@ -15,6 +15,6 @@ export default function Index() {
 
   if (!hydrated) return null;
 
-  const isLoggedIn = useStore.getState().currentUser() !== null;
-  return <Redirect href={isLoggedIn ? '/grades' : '/login'} />;
+  const user = useStore.getState().currentUser();
+  return <Redirect href={user ? (homePath(user) as any) : '/login'} />;
 }

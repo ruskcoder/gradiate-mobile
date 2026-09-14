@@ -1,5 +1,6 @@
 import '@/global.css';
 import { applyColorTheme } from '@/lib/apply-color-theme';
+import { BELL_SCHEDULES_VERSION, migrateBellSchedules } from '@/lib/bell-schedules';
 import { AppSettingsProvider } from '@/lib/app-settings';
 import { DEFAULT_COLOR_THEME_ID, getColorThemeById } from '@/lib/color-themes';
 import { setGradesNotificationsEnabled } from '@/lib/grades-notifications-task';
@@ -85,6 +86,16 @@ function AppContent() {
     notificationAccountKey,
     notificationsEnabled,
   ]);
+
+  // Apply this year's built-in bell schedules once per account.
+  React.useEffect(() => {
+    const next = migrateBellSchedules(user);
+    if (!next) return;
+    const { changeUserData } = useStore.getState();
+    changeUserData('bellSchedules', next);
+    changeUserData('bellSchedulesVersion', BELL_SCHEDULES_VERSION);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notificationAccountKey, user?.bellSchedulesVersion]);
 
   // A background API call found the current session/password invalid (see
   // `handleAuthError` in lib/grades-api.ts). Bounce to /login from wherever

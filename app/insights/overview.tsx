@@ -356,7 +356,7 @@ export default function OverviewScreen() {
   return (
     <View className="flex-1 bg-background">
       <ScreenHeader
-        title="Overview"
+        title="Dashboard"
         right={
           classes.length > 0 ? (
             <Button variant="ghost" size="icon" className="rounded-full" onPress={promptShare}>

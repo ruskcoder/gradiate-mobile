@@ -121,8 +121,12 @@ export interface User {
   changeAlerts?: boolean;
   // Create todos for missing assignments after each grades load.
   autoTodoFromMissing?: boolean;
-  // Name of the bell schedule the Overview uses for "current period".
+  // Name of the bell schedule the Dashboard uses for "current period".
   activeBellSchedule?: string;
+  // Screen opened after login / on launch.
+  defaultPage?: 'dashboard' | 'grades';
+  // Which built-in bell schedule set has been applied (see lib/bell-schedules).
+  bellSchedulesVersion?: number;
   gradesStore: {
     initialTerm: string;
     termList: string[];
@@ -272,6 +276,8 @@ const DEFAULT_USER: User = {
   changeAlerts: true,
   autoTodoFromMissing: false,
   activeBellSchedule: '',
+  defaultPage: 'grades',
+  bellSchedulesVersion: 0,
   gradesStore: {
     initialTerm: '',
     termList: [],
@@ -838,6 +844,10 @@ export const useCurrentUser = () => {
     return users[currentUserIndex];
   });
 };
+
+/** Route for the user's chosen start screen. */
+export const homePath = (user: User | null | undefined = useStore.getState().currentUser()) =>
+  user?.defaultPage === 'dashboard' ? '/insights/overview' : '/grades';
 
 export const currentUser = () => {
   return useStore.getState().currentUser();

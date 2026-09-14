@@ -1,6 +1,6 @@
 import { AssignmentCard, type AssignmentScore } from '@/components/custom/assignment-card';
 import { CategoryCard, type CategoryCardData } from '@/components/custom/category-card';
-import { ClassExtras } from '@/components/custom/class-extras';
+import { ClassHeaderActions } from '@/components/custom/class-extras';
 import { GradeRing } from '@/components/custom/grade-ring';
 import { Spinner } from '@/components/custom/spinner';
 import { Button } from '@/components/ui/button';
@@ -181,6 +181,14 @@ export default function GradesDetailScreen() {
         </View>
         {/* The "Load from Storage" control lives below the loading spinner
             (mirroring the main grades page), not up here. */}
+        {params.id ? (
+          <ClassHeaderActions
+            course={params.id}
+            name={detail?.courseName ?? params.name ?? ''}
+            average={detail?.grade ?? params.average}
+            categories={detail?.groups ? undefined : detail?.categories}
+          />
+        ) : null}
         <Pressable
           onPress={() =>
             router.push({
@@ -318,13 +326,6 @@ export default function GradesDetailScreen() {
               </View>
             </>
           )}
-
-          <ClassExtras
-            course={detail.id}
-            name={detail.courseName}
-            average={detail.grade}
-            categories={detail.groups ? undefined : detail.categories}
-          />
         </ScrollView>
       )}
     </View>
