@@ -1,5 +1,6 @@
 import { AssignmentCard, type AssignmentScore } from '@/components/custom/assignment-card';
 import { CategoryCard, type CategoryCardData } from '@/components/custom/category-card';
+import { ClassExtras } from '@/components/custom/class-extras';
 import { GradeRing } from '@/components/custom/grade-ring';
 import { Spinner } from '@/components/custom/spinner';
 import { Button } from '@/components/ui/button';
@@ -317,6 +318,13 @@ export default function GradesDetailScreen() {
               </View>
             </>
           )}
+
+          <ClassExtras
+            course={detail.id}
+            name={detail.courseName}
+            average={detail.grade}
+            categories={detail.groups ? undefined : detail.categories}
+          />
         </ScrollView>
       )}
     </View>

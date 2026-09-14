@@ -14,7 +14,8 @@ import { useCurrentUser, useStore } from '@/lib/store';
 import { TOOL_TITLES } from '@/lib/tool-types';
 import { useLatchedValue } from '@/lib/use-latched-value';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronLeft, RefreshCw } from 'lucide-react-native';
+import { ChevronLeft, RefreshCw, X } from 'lucide-react-native';
+import { describeGradeChange } from '@/lib/grade-alerts';
 import * as React from 'react';
 import { BackHandler, InteractionManager, ScrollView, View } from 'react-native';
 import Animated, {
@@ -498,6 +499,8 @@ export default function Screen() {
   const user = useCurrentUser();
   const toolMode = useStore((s) => s.toolMode);
   const setToolMode = useStore((s) => s.setToolMode);
+  const gradeChanges = useStore((s) => s.gradeChanges);
+  const setGradeChanges = useStore((s) => s.setGradeChanges);
 
   // While a Tools mode is active, Android back exits to the Tools tab instead
   // of falling through to the default (which — since this tab has nothing
@@ -984,6 +987,26 @@ export default function Screen() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
         className="flex-1 px-4">
+        {gradeChanges.length > 0 && !toolMode && (
+          <View className="mb-3 flex-row items-start gap-2 rounded-xl border border-primary/40 bg-card p-3">
+            <View className="min-w-0 flex-1 gap-0.5">
+              <Text className="font-semibold">
+                {gradeChanges.length === 1 ? 'Grade updated' : `${gradeChanges.length} grades updated`}
+              </Text>
+              {gradeChanges.slice(0, 4).map((c) => (
+                <Text key={c.name} className="text-sm text-muted-foreground" numberOfLines={2}>
+                  {describeGradeChange(c)}
+                </Text>
+              ))}
+              {gradeChanges.length > 4 && (
+                <Text className="text-xs text-muted-foreground">+{gradeChanges.length - 4} more</Text>
+              )}
+            </View>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onPress={() => setGradeChanges([])}>
+              <Icon as={X} className="size-4" />
+            </Button>
+          </View>
+        )}
         {/* Outer relative wrapper so the initial-reveal progress overlay (below)
             can pin itself over the top of the tabs + stage without being pushed
             around when the tabs mount. */}

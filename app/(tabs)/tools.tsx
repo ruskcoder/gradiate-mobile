@@ -8,6 +8,9 @@ import { useColorScheme } from '@/lib/useColorScheme';
 import type { ToolType } from '@/lib/tool-types';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  AlertTriangle,
+  LayoutDashboard,
+  Search,
   Calculator,
   ChevronLeft,
   GraduationCap,
@@ -88,17 +91,43 @@ export default function CalculatorsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      {(showPageTitles || fromCourse) && (
-        <View className="flex-row items-center justify-between px-4 py-3">
+      <View className="flex-row items-center justify-between px-4 py-3">
           {showPageTitles ? <Text className="text-2xl font-bold">Tools</Text> : <View />}
+          {!fromCourse && (
+            <Button onPress={() => router.push('/search' as any)} size="icon" variant="ghost" className="rounded-full">
+              <Icon as={Search} className="size-5" />
+            </Button>
+          )}
           {fromCourse && (
             <Button onPress={exitToCourse} size="icon" variant="ghost" className="rounded-full">
               <Icon as={ChevronLeft} className="size-5" />
             </Button>
           )}
         </View>
-      )}
       <ScrollView className="px-4" contentContainerStyle={{ paddingBottom: 128 }}>
+        {/* Insights Section */}
+        {!fromCourse && (
+          <View className="mb-4">
+            <Text className="text-lg font-semibold mb-3">Insights</Text>
+            <ListItemsList>
+              <ListItem
+                squareText={<Icon as={LayoutDashboard} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+                squareColor=""
+                title="Overview"
+                desc="GPA projection, bell schedule, goals and to-dos"
+                onPress={() => router.push('/insights/overview' as any)}
+              />
+              <ListItem
+                squareText={<Icon as={AlertTriangle} className="size-5" color={isDarkColorScheme ? 'white' : 'black'} />}
+                squareColor=""
+                title="Missing Work"
+                desc="Missing and zero assignments across classes"
+                onPress={() => router.push('/insights/missing' as any)}
+              />
+            </ListItemsList>
+          </View>
+        )}
+
         {/* Calculators Section */}
         <View className="mb-4">
           <Text className="text-lg font-semibold mb-3">Calculators</Text>

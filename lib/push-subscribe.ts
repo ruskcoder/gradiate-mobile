@@ -1,10 +1,9 @@
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
-import { Platform } from 'react-native';
 import { API_URL } from '@/lib/constants';
 import { currentUser } from '@/lib/store';
-import { checkGradesAndNotify } from '@/lib/grades-notifications-task';
+import { checkGradesAndNotify, ensureGradesChannel } from '@/lib/grades-notifications-task';
 
 export const PUSH_TRIGGER_TASK = 'gradiate-push-trigger';
 
@@ -76,12 +75,7 @@ export async function subscribeForPush(): Promise<void> {
       return;
     }
 
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('grades', {
-        name: 'Grade updates',
-        importance: Notifications.AndroidImportance.HIGH,
-      });
-    }
+    await ensureGradesChannel();
 
     const projectId = getProjectId();
     const { data: token } = await Notifications.getExpoPushTokenAsync(

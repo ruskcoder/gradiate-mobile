@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.ruskcoder.gradexis.progressnotification'
+version = '0.1.0'
+
+android {
+  namespace "com.ruskcoder.gradexis.progressnotification"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // NotificationCompat / NotificationManagerCompat / ContextCompat.registerReceiver.
+  // Same coordinate expo-notifications pulls in, so Gradle resolves one version.
+  implementation 'androidx.core:core:1.17.0'
+}
