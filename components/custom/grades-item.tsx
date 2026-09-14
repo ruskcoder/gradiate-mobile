@@ -71,15 +71,14 @@ export function gradeAndColor(
 
 export type GradesVariant = 'list' | 'card';
 
-/** Pill showing how far a class average moved since it was last opened. */
-function DeltaBadge({ delta, className }: { delta: number | null | undefined; className: string }) {
+/** Inline pill after the course ID showing how far the average moved since the
+ *  class was last opened. Fixed 18px height so it never grows the text line. */
+function DeltaBadge({ delta }: { delta: number | null | undefined }) {
   if (delta === null || delta === undefined) return null;
   const up = delta > 0;
   return (
-    <View
-      pointerEvents="none"
-      className={cn('absolute z-10 rounded-full px-2 py-1', up ? 'bg-green-600' : 'bg-red-600', className)}>
-      <Text className="text-[13px] font-semibold leading-none text-white">
+    <View className={cn('ml-1.5 h-[18px] justify-center rounded-full px-1.5', up ? 'bg-green-600' : 'bg-red-600')}>
+      <Text className="text-[12px] font-semibold leading-none text-white">
         {up ? '+' : ''}
         {delta.toFixed(2)}%
       </Text>
@@ -87,15 +86,26 @@ function DeltaBadge({ delta, className }: { delta: number | null | undefined; cl
   );
 }
 
-/** Star on the item's top-left corner when new assignments were posted. */
+/** Course ID with the change pill after it, on one fixed-height line. */
+function IdLine({ id, delta }: { id: string; delta: number | null | undefined }) {
+  return (
+    <View className="h-5 min-w-0 flex-row items-center">
+      <Text className="shrink text-sm text-muted-foreground" numberOfLines={1}>
+        {id}
+      </Text>
+      <DeltaBadge delta={delta} />
+    </View>
+  );
+}
+
+/** Star centered on the item's top-left corner when new assignments were posted. */
 function NewAssignmentsBadge({ count }: { count: number | undefined }) {
   if (!count) return null;
   return (
     <View
       pointerEvents="none"
-      className="absolute -left-1.5 -top-1.5 z-10 h-5 min-w-5 flex-row items-center justify-center gap-0.5 rounded-full bg-amber-400 px-1">
+      className="absolute -left-2.5 -top-2.5 z-10 h-5 w-5 items-center justify-center rounded-full bg-amber-400">
       <Icon as={Star} className="size-3 text-amber-950" fill="#451a03" />
-      {count > 1 && <Text className="text-[10px] font-bold leading-none text-amber-950">{count}</Text>}
     </View>
   );
 }
@@ -164,7 +174,6 @@ export function GradesItem({
             pointerEvents="none"
             style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
           />
-          <DeltaBadge delta={change?.delta} className="right-2 top-2" />
           <Text className={cn('text-[2.5rem] font-semibold leading-10', textColor)}>
             {displayGrade}
           </Text>
@@ -180,9 +189,7 @@ export function GradesItem({
           <Text className="text-base font-semibold" numberOfLines={1}>
             {courseName}
           </Text>
-          <Text className="text-sm text-muted-foreground" numberOfLines={1}>
-            {id}
-          </Text>
+          <IdLine id={id} delta={change?.delta} />
         </View>
       </Pressable>
       <NewAssignmentsBadge count={change?.newCount} />
@@ -199,9 +206,7 @@ export function GradesItem({
         <Text className="truncate text-base font-semibold" numberOfLines={1}>
           {courseName}
         </Text>
-        <Text className="truncate text-sm text-muted-foreground" numberOfLines={1}>
-          {id}
-        </Text>
+        <IdLine id={id} delta={change?.delta} />
       </View>
       <View
         className={cn('relative min-w-[86px] items-center overflow-hidden rounded-sm px-2 py-1', gradeColor)}>
@@ -217,7 +222,6 @@ export function GradesItem({
       </View>
     </Pressable>
     <NewAssignmentsBadge count={change?.newCount} />
-    <DeltaBadge delta={change?.delta} className="-top-1 right-4" />
     </View>
   );
 }
