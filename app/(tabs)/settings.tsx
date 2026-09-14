@@ -1,6 +1,6 @@
 // app/settings.tsx
 import * as React from 'react';
-import { View, ScrollView, Pressable, Alert } from 'react-native';
+import { View, ScrollView, Pressable, Alert, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,8 +48,23 @@ import {
   Type,
   Camera,
   Sparkles,
+  Image as ImageIcon,
+  BellRing,
+  ListPlus,
+  Share2,
+  Copy,
+  ClipboardPaste,
+  Eraser,
+  Home,
+  Trash2,
 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
+import { buildBackup, restoreBackup } from '~/lib/backup';
+import { syncMissingTodos } from '~/lib/grade-alerts';
 import { useAppSettings, type NumberDisplay } from '~/lib/app-settings';
+import { sendTestGradeNotification } from '~/lib/grades-notifications-task';
+import { canRenderGradeImage } from '~/lib/grade-notification-image';
 import { useColorScheme } from '~/lib/useColorScheme';
 import { useCurrentUser, useStore } from '~/lib/store';
 import { PLATFORM_MAPPING } from '~/lib/constants';
@@ -145,14 +160,126 @@ export default function SettingsScreen() {
     setAnimationsEnabled,
     notificationsEnabled,
     setNotificationsEnabled,
+    gradeImageNotifications,
+    setGradeImageNotifications,
     numberDisplay,
     setNumberDisplay,
   } = useAppSettings();
+
+  const [sendingTest, setSendingTest] = React.useState(false);
+
+  /** The image is drawn by a native module, so a build made before it shipped
+   *  (or any non-Android device) silently falls back to a text notification.
+   *  Say so when the switch is turned on rather than letting it look broken. */
+  function toggleGradeImage(value: boolean) {
+    setGradeImageNotifications(value);
+    if (value && !canRenderGradeImage()) {
+      Alert.alert(
+        'Not available on this build',
+        'Grade images need the Android build that includes them. Notifications will stay text-only until then.'
+      );
+    }
+  }
+
+  async function sendTestNotification() {
+    if (sendingTest) return;
+    setSendingTest(true);
+    try {
+      await sendTestGradeNotification(gradeImageNotifications);
+    } catch (e) {
+      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSendingTest(false);
+    }
+  }
 
   const user = useCurrentUser();
   const removeUser = useStore((s) => s.removeUser);
   const changeUserData = useStore((s) => s.changeUserData);
   const currentUserIndex = useStore((s) => s.currentUserIndex);
+
+  const changeAlerts = user?.changeAlerts !== false;
+  const autoTodoFromMissing = !!user?.autoTodoFromMissing;
+
+  function toggleAutoTodo(value: boolean) {
+    changeUserData('autoTodoFromMissing', value);
+    if (value) syncMissingTodos();
+  }
+
+  async function exportBackup() {
+    if (!user) return;
+    try {
+      await Share.share({ title: 'Gradiate backup', message: buildBackup(user) });
+    } catch (e) {
+      Alert.alert('Could not export', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function copyBackup() {
+    if (!user) return;
+    await Clipboard.setStringAsync(buildBackup(user));
+    Alert.alert('Backup copied', 'Paste it somewhere safe, like a note or an email to yourself. Passwords are not included.');
+  }
+
+  async function restoreFromClipboard() {
+    const text = await Clipboard.getStringAsync();
+    if (!text) {
+      Alert.alert('Clipboard is empty', 'Copy a backup first, then try again.');
+      return;
+    }
+    Alert.alert(
+      'Restore backup?',
+      'Settings, to-dos, goals, notes and bell schedules will be replaced. Grade history is merged.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          onPress: () => {
+            try {
+              Alert.alert('Backup restored', restoreBackup(text));
+            } catch (e) {
+              Alert.alert('Could not restore', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  const defaultPage = user?.defaultPage ?? 'grades';
+  const DEFAULT_PAGE_OPTIONS: { value: 'dashboard' | 'grades'; label: string }[] = [
+    { value: 'dashboard', label: 'Dashboard' },
+    { value: 'grades', label: 'Grades' },
+  ];
+
+  function confirmClearHistory() {
+    Alert.alert('Clear grades history?', 'This permanently deletes all stored grades history on this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => useStore.getState().clearGradesStore() },
+    ]);
+  }
+
+  function confirmWipeDevice() {
+    Alert.alert(
+      'Remove all data from this device?',
+      'Signs out every account and deletes saved passwords, grade history, to-dos and settings. Export a backup first if you want to keep them.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove everything',
+          style: 'destructive',
+          onPress: async () => {
+            const state = useStore.getState();
+            // removeUser also deletes each account's keystore credentials.
+            for (let i = state.users.length - 1; i >= 0; i--) useStore.getState().removeUser(i);
+            useStore.getState().setCurrentUserIndex(-1);
+            await AsyncStorage.clear();
+            router.replace('/login');
+          },
+        },
+      ]
+    );
+  }
 
   const GRADES_VIEW_OPTIONS: { value: 'list' | 'card'; label: string }[] = [
     { value: 'list', label: 'List' },
@@ -300,6 +427,21 @@ export default function SettingsScreen() {
             }
           />
           <SettingsRow
+            icon={<Icon as={ImageIcon} className='size-4 text-primary' />}
+            label='Grade in notification'
+            onPress={() => toggleGradeImage(!gradeImageNotifications)}
+            right={
+              <View pointerEvents='none'>
+                <Switch checked={gradeImageNotifications} onCheckedChange={toggleGradeImage} />
+              </View>
+            }
+          />
+          <SettingsRow
+            icon={<Icon as={BellRing} className='size-4 text-primary' />}
+            label={sendingTest ? 'Sending…' : 'Send test notification'}
+            onPress={sendTestNotification}
+          />
+          <SettingsRow
             icon={<Icon as={Moon} className='size-4 text-primary' />}
             label='Theme'
             right={
@@ -407,6 +549,81 @@ export default function SettingsScreen() {
               </View>
             }
           /> */}
+        </SettingsSection>
+
+        {/* Grades & data */}
+        <SettingsSection title='Grades & Data'>
+          <SettingsRow
+            icon={<Icon as={Home} className='size-4 text-primary' />}
+            label='Default page'
+            right={
+              <Select
+                value={{
+                  value: defaultPage,
+                  label: DEFAULT_PAGE_OPTIONS.find((o) => o.value === defaultPage)?.label ?? 'Grades',
+                }}
+                onValueChange={(option) =>
+                  option && changeUserData('defaultPage', option.value as 'dashboard' | 'grades')
+                }
+              >
+                <SelectTrigger className='w-32'>
+                  <SelectValue placeholder='Page' className='text-sm text-foreground' />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEFAULT_PAGE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value} label={option.label} />
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            icon={<Icon as={Sparkles} className='size-4 text-primary' />}
+            label='Show grade change banner'
+            onPress={() => changeUserData('changeAlerts', !changeAlerts)}
+            right={
+              <View pointerEvents='none'>
+                <Switch checked={changeAlerts} onCheckedChange={(v) => changeUserData('changeAlerts', v)} />
+              </View>
+            }
+          />
+          <SettingsRow
+            icon={<Icon as={ListPlus} className='size-4 text-primary' />}
+            label='Add missing work to to-dos'
+            onPress={() => toggleAutoTodo(!autoTodoFromMissing)}
+            right={
+              <View pointerEvents='none'>
+                <Switch checked={autoTodoFromMissing} onCheckedChange={toggleAutoTodo} />
+              </View>
+            }
+          />
+          <SettingsRow
+            icon={<Icon as={Share2} className='size-4 text-primary' />}
+            label='Export backup'
+            onPress={exportBackup}
+          />
+          <SettingsRow
+            icon={<Icon as={Copy} className='size-4 text-primary' />}
+            label='Copy backup to clipboard'
+            onPress={copyBackup}
+          />
+          <SettingsRow
+            icon={<Icon as={ClipboardPaste} className='size-4 text-primary' />}
+            label='Restore backup from clipboard'
+            onPress={restoreFromClipboard}
+          />
+          <SettingsRow
+            icon={<Icon as={Eraser} className='size-4 text-destructive' />}
+            label='Clear grades history'
+            destructive
+            onPress={confirmClearHistory}
+          />
+          <SettingsRow
+            icon={<Icon as={Trash2} className='size-4 text-destructive' />}
+            label='Remove all data from this device'
+            destructive
+            onPress={confirmWipeDevice}
+          />
         </SettingsSection>
 
         {/* Account */}

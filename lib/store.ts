@@ -29,6 +29,17 @@ export interface TodoItem {
   title: string;
   dueDate: Date | null;
   completed: boolean;
+  // Set on todos created automatically (e.g. from a missing assignment) so they
+  // can be deduped against later refreshes. Absent on user-created todos.
+  source?: string;
+}
+
+/** One class whose grade moved (or got new assignments) since the last load. */
+export interface GradeChange {
+  name: string;
+  from: number | null;
+  to: number | null;
+  newAssignments: string[];
 }
 
 export interface Shortcut {
@@ -87,6 +98,10 @@ export interface User {
   // Mobile-only (no web equivalent): when true, an hourly background task
   // checks the current term's grades and notifies on any change.
   notificationsEnabled?: boolean;
+  // Mobile-only (no web equivalent): draw the new grade and its change into the
+  // notification's image instead of sending a plain text row. Android-only in
+  // practice — see `lib/grade-notification-image.ts`.
+  gradeImageNotifications?: boolean;
   // How to display numeric grades: decimal (88.5), rounded (89), letter (B), or letter+ (A-)
   numberDisplay?: 'decimal' | 'rounded' | 'letter' | 'letter+';
   bellSchedules: BellSchedule[];
@@ -98,6 +113,20 @@ export interface User {
   rankDataPoints: Array<{ gpa: number | null; rank: number | null }>;
   todos: TodoItem[];
   shortcuts: Shortcut[];
+  // Target average per class, keyed `${course}|${name}`.
+  goals?: Record<string, number>;
+  // Free-form notes per class, keyed `${course}|${name}`.
+  classNotes?: Record<string, string>;
+  // Show an in-app banner when a load finds changed averages or new assignments.
+  changeAlerts?: boolean;
+  // Create todos for missing assignments after each grades load.
+  autoTodoFromMissing?: boolean;
+  // Name of the bell schedule the Dashboard uses for "current period".
+  activeBellSchedule?: string;
+  // Screen opened after login / on launch.
+  defaultPage?: 'dashboard' | 'grades';
+  // Which built-in bell schedule set has been applied (see lib/bell-schedules).
+  bellSchedulesVersion?: number;
   gradesStore: {
     initialTerm: string;
     termList: string[];
@@ -228,6 +257,7 @@ const DEFAULT_USER: User = {
   animationsEnabled: true,
   tabBarIndicatorEnabled: true,
   notificationsEnabled: true,
+  gradeImageNotifications: true,
   numberDisplay: 'decimal',
   bellSchedules: [],
   premium: false,
@@ -241,6 +271,13 @@ const DEFAULT_USER: User = {
   ],
   todos: [],
   shortcuts: [],
+  goals: {},
+  classNotes: {},
+  changeAlerts: true,
+  autoTodoFromMissing: false,
+  activeBellSchedule: '',
+  defaultPage: 'grades',
+  bellSchedulesVersion: 0,
   gradesStore: {
     initialTerm: '',
     termList: [],
@@ -311,6 +348,11 @@ interface UserStore {
   reauthUsername: string | null;
   reauthDistrict: District | null;
   setReauthRequired: (info: { username: string; district: District } | null) => void;
+
+  /** Session-only (not persisted) — what the most recent grades load changed,
+   *  shown as a dismissible banner on the Grades tab. */
+  gradeChanges: GradeChange[];
+  setGradeChanges: (changes: GradeChange[]) => void;
 }
 
 export const useStore = create<UserStore>()(
@@ -331,6 +373,9 @@ export const useStore = create<UserStore>()(
           reauthUsername: info?.username ?? null,
           reauthDistrict: info?.district ?? null,
         }),
+
+      gradeChanges: [],
+      setGradeChanges: (changes) => set({ gradeChanges: changes }),
 
       currentUser: (): User | null => {
         const { users, currentUserIndex } = get();
@@ -799,6 +844,10 @@ export const useCurrentUser = () => {
     return users[currentUserIndex];
   });
 };
+
+/** Route for the user's chosen start screen. */
+export const homePath = (user: User | null | undefined = useStore.getState().currentUser()) =>
+  user?.defaultPage === 'dashboard' ? '/insights/overview' : '/grades';
 
 export const currentUser = () => {
   return useStore.getState().currentUser();

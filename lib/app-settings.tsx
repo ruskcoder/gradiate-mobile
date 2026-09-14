@@ -26,6 +26,10 @@ interface AppSettingsContextValue {
    *  notification per class whose grade changed. */
   notificationsEnabled: boolean;
   setNotificationsEnabled: (value: boolean) => void;
+  /** Draw the new grade and how far it moved into the notification's image,
+   *  rather than sending a plain text-only notification. */
+  gradeImageNotifications: boolean;
+  setGradeImageNotifications: (value: boolean) => void;
   /** How to display numeric grades: decimal, rounded, letter, or letter+ */
   numberDisplay: NumberDisplay;
   setNumberDisplay: (value: NumberDisplay) => void;
@@ -58,6 +62,8 @@ export function useAppSettings(): AppSettingsContextValue {
       changeUserData('notificationsEnabled', value);
       setGradesNotificationsEnabled(value);
     },
+    gradeImageNotifications: user?.gradeImageNotifications ?? true,
+    setGradeImageNotifications: (value) => changeUserData('gradeImageNotifications', value),
     numberDisplay: (user?.numberDisplay ?? 'decimal') as NumberDisplay,
     setNumberDisplay: (value) => changeUserData('numberDisplay', value),
   };

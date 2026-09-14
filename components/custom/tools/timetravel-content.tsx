@@ -75,6 +75,31 @@ export function TimeTravelContent({ history }: { history: CourseHistoryEntry[] }
         )}
       </View>
 
+      {displayedGrade && sliderValue < history.length - 1 && (() => {
+        const latest = history[history.length - 1];
+        const from = parseFloat(String(displayedGrade.average));
+        const to = parseFloat(String(latest.average));
+        const seen = new Set((displayedGrade.scores || []).map((s: any) => `${s.name}|${s.dateDue}`));
+        const added = (latest.scores || []).filter((s: any) => !seen.has(`${s.name}|${s.dateDue}`)).length;
+        const delta = Number.isFinite(from) && Number.isFinite(to) ? to - from : null;
+        return (
+          <View className="rounded-lg bg-muted p-3">
+            <Text className="text-sm">
+              Since then:{' '}
+              {delta !== null ? (
+                <Text className={`text-sm font-semibold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : ''}`}>
+                  {delta > 0 ? '+' : ''}
+                  {delta.toFixed(2)} (now {to.toFixed(2)})
+                </Text>
+              ) : (
+                'average unavailable'
+              )}
+              {added > 0 ? ` · ${added} new assignment${added === 1 ? '' : 's'}` : ''}
+            </Text>
+          </View>
+        );
+      })()}
+
       {displayedGrade && (
         <>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>

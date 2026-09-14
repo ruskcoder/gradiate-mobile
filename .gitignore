@@ -34,9 +34,14 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# Build
-android/
-ios/
+# Build — anchored to the repo root so this only ignores the prebuild output.
+# Unanchored, these also matched `modules/*/android`, silently leaving local
+# native modules' sources untracked.
+/android/
+/ios/
+# ...but local native modules under modules/ are real sources, so only their
+# Gradle output is ignored.
+modules/*/android/build/
 
 cs.ps1
 

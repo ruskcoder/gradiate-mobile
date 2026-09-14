@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { ListItem, ListItemsList } from '@/components/custom/list-item';
 import { ScreenHeader } from '@/components/custom/screen-header';
+import { CRHS_BELL_SCHEDULES } from '@/lib/bell-schedules';
 import { useStore } from '@/lib/store';
 import { Plus, School } from 'lucide-react-native';
 import * as React from 'react';
@@ -15,6 +16,7 @@ export default function BellScheduleListScreen() {
   const router = useRouter();
   const currentUserIndex = useStore((s) => s.currentUserIndex);
   const users = useStore((s) => s.users);
+  const changeUserData = useStore((s) => s.changeUserData);
   const currentUser = users[currentUserIndex];
   const bellSchedules = currentUser?.bellSchedules || [];
 
@@ -54,7 +56,12 @@ export default function BellScheduleListScreen() {
             />
           ))}
           {bellSchedules.length === 0 && (
-            <Text className="py-2 text-muted-foreground">No bell schedules yet.</Text>
+            <View className="items-center gap-2 py-2">
+              <Text className="text-muted-foreground">No bell schedules yet.</Text>
+              <Button variant="outline" size="sm" onPress={() => changeUserData('bellSchedules', CRHS_BELL_SCHEDULES)}>
+                <Text>Load Cinco Ranch HS 2026–27 schedules</Text>
+              </Button>
+            </View>
           )}
         </ListItemsList>
       </ScrollView>

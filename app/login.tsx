@@ -641,7 +641,9 @@ export default function LoginScreen() {
       useStore.getState().setCurrentUserIndex(newIndex);
     }
     setMfaOpen(false);
-    router.replace('/grades');
+    router.replace(
+      (useStore.getState().currentUser()?.defaultPage === 'dashboard' ? '/insights/overview' : '/grades') as any
+    );
   };
 
   // Called by the Microsoft WebView once it has captured the portal session
