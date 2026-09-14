@@ -78,10 +78,10 @@ function DeltaBadge({ delta, className }: { delta: number | null | undefined; cl
   return (
     <View
       pointerEvents="none"
-      className={cn('absolute z-10 rounded-full px-1.5 py-0.5', up ? 'bg-green-600' : 'bg-red-600', className)}>
-      <Text className="text-[11px] font-semibold leading-none text-white">
+      className={cn('absolute z-10 rounded-full px-2 py-1', up ? 'bg-green-600' : 'bg-red-600', className)}>
+      <Text className="text-[13px] font-semibold leading-none text-white">
         {up ? '+' : ''}
-        {delta.toFixed(2)}
+        {delta.toFixed(2)}%
       </Text>
     </View>
   );
@@ -217,7 +217,7 @@ export function GradesItem({
       </View>
     </Pressable>
     <NewAssignmentsBadge count={change?.newCount} />
-    <DeltaBadge delta={change?.delta} className="-right-1.5 -top-1.5" />
+    <DeltaBadge delta={change?.delta} className="-top-1 right-4" />
     </View>
   );
 }

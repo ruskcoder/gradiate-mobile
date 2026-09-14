@@ -348,7 +348,8 @@ function GradesTermPage({
           )}
 
           {!error && displayedClasses.length > 0 && (
-            <Animated.View style={animationsEnabled ? contentShiftStyle : undefined}>
+            // pt-2 keeps the first row's outline badges from being clipped by the scroll view.
+            <Animated.View className="pt-2" style={animationsEnabled ? contentShiftStyle : undefined}>
               {gradesView === 'list' ? (
                 <ReorderableList
                   items={displayedClasses}
