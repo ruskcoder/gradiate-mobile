@@ -4,7 +4,7 @@ import { ReorderableList } from '@/components/custom/reorderable-list';
 import { Icon } from '@/components/ui/icon';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { flatForest, pathToLabel, barsForPath, type TermNode } from '@/lib/term-tree';
+import { flatForest, pathToLabel, barsForPath, pathForTab, type TermNode } from '@/lib/term-tree';
 import { Text } from '@/components/ui/text';
 import { useAppSettings } from '@/lib/app-settings';
 import { applyCourseOrder, getCourseOrder, setCourseOrder } from '@/lib/course-order-storage';
@@ -524,6 +524,8 @@ export default function Screen() {
   // deepest entry is the label whose averages we show.
   const [termTree, setTermTree] = React.useState<TermNode[]>([]);
   const [selectedPath, setSelectedPath] = React.useState<string[]>([]);
+  // The API's current term, so clicking a letter-group tab lands on it.
+  const apiTermRef = React.useRef<string | undefined>(undefined);
   const [dataFormat, setDataFormat] = React.useState<'scores' | 'terms' | null>(null);
   const [classesByTerm, setClassesByTerm] = React.useState<Record<string, Course[]>>({});
   const [rawTermClasses, setRawTermClasses] = React.useState<Course[]>([]);
@@ -628,6 +630,7 @@ export default function Screen() {
             const forest = chunk.termTree?.length ? chunk.termTree : flatForest(chunk.termList);
             setTermTree(forest);
             setTerms(forest.map((n: TermNode) => n.label));
+            apiTermRef.current = chunk.term;
             if (!userHasSelectedTerm.current) {
               // Default selection: the path down to the API's current term.
               const path = pathToLabel(forest, chunk.term);
@@ -720,8 +723,9 @@ export default function Screen() {
   const handleTabChange = (term: string) => {
     userHasSelectedTerm.current = true;
     setCurrentTerm(term);
-    // Reset the drill-down to the freshly-selected top tab.
-    setSelectedPath([term]);
+    // Reset the drill-down to the freshly-selected top tab (a letter group
+    // drills into one of its columns, since the group itself has no grade).
+    setSelectedPath(pathForTab(termTree, term, apiTermRef.current));
     if (classesByTerm[term] || loadingTerms[term]) return;
     fetchClasses(term);
   };
@@ -1015,7 +1019,7 @@ export default function Screen() {
                 onValueChange={(v) => handleSubtabChange(level, v, bar.parent)}
                 className="mb-3 w-full">
                 <TabsList className="w-full">
-                  {[bar.parent, ...bar.options].map((sub) => (
+                  {(bar.showParent ? [bar.parent, ...bar.options] : bar.options).map((sub) => (
                     <TabsTrigger key={sub} value={sub} className="flex-1">
                       <Text>{sub}</Text>
                     </TabsTrigger>
@@ -1043,7 +1047,9 @@ export default function Screen() {
               if (!isActive && !visitedTerms[term]) return null;
               // Active tab shows its deepest selected column; inactive tabs show
               // their own root roll-up.
-              const label = isActive ? (selectedPath[selectedPath.length - 1] || term) : term;
+              const label = isActive
+                ? (selectedPath[selectedPath.length - 1] || term)
+                : pathForTab(termTree, term, apiTermRef.current).slice(-1)[0];
               const courseOrderLoadedForTerm = !!courseOrderLoadedTerms[term];
               const dataStillLoadingForTerm = !!loadingTerms[term] || !courseOrderLoadedForTerm;
               const doneHoldPendingForTerm = !(doneHoldElapsed[term] ?? true);

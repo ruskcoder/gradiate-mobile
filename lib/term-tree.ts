@@ -8,10 +8,10 @@
  * map is keyed by every column label, so any selected node resolves to a grade.
  */
 
-export type TermNode = { label: string; children: TermNode[] };
+export type TermNode = { label: string; group?: boolean; children: TermNode[] };
 
 /** One subtab bar: the parent's own roll-up plus its child columns. */
-export type SubtabBar = { parent: string; options: string[]; selected: string };
+export type SubtabBar = { parent: string; showParent: boolean; options: string[]; selected: string };
 
 /** Wrap a flat label list as a depth-1 forest (portals with no subterms). */
 export function flatForest(labels: string[] | undefined): TermNode[] {
@@ -37,6 +37,18 @@ export function pathToLabel(forest: TermNode[], label: string): string[] {
 }
 
 /**
+ * The path to select when top tab `tab` is clicked. Group tabs (a letter family
+ * like PR, `group: true`) have no grade of their own, so drill into a child:
+ * `preferred` if it lives in the group, else the group's first column.
+ */
+export function pathForTab(forest: TermNode[], tab: string, preferred?: string): string[] {
+  const node = (forest || []).find((n) => n.label === tab);
+  if (!node || !node.group || !node.children?.length) return [tab];
+  const p = pathToLabel([node], preferred ?? '');
+  return p.length > 1 ? p : [tab, node.children[0].label];
+}
+
+/**
  * The stack of subtab bars for a selected path — one per level whose node has
  * children. Each bar offers the parent itself (its own roll-up grade) plus its
  * child columns, with the currently-selected child (or the parent) marked.
@@ -50,8 +62,9 @@ export function barsForPath(forest: TermNode[], path: string[]): SubtabBar[] {
     if (node.children && node.children.length) {
       bars.push({
         parent: path[i],
+        showParent: !node.group,
         options: node.children.map((c) => c.label),
-        selected: path[i + 1] ?? path[i],
+        selected: path[i + 1] ?? (node.group ? node.children[0].label : path[i]),
       });
     }
     level = node.children || [];
