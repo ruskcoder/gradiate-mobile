@@ -57,6 +57,8 @@ import {
   Eraser,
   Home,
   Trash2,
+  Check,
+  UserPlus,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -66,7 +68,7 @@ import { useAppSettings, type NumberDisplay } from '~/lib/app-settings';
 import { sendTestGradeNotification } from '~/lib/grades-notifications-task';
 import { canRenderGradeImage } from '~/lib/grade-notification-image';
 import { useColorScheme } from '~/lib/useColorScheme';
-import { useCurrentUser, useStore } from '~/lib/store';
+import { accountKey, homePath, useCurrentUser, useStore } from '~/lib/store';
 import { PLATFORM_MAPPING } from '~/lib/constants';
 import { type ThemeMode } from '~/lib/theme-mode-storage';
 import { cn } from '~/lib/utils';
@@ -197,6 +199,14 @@ export default function SettingsScreen() {
   const removeUser = useStore((s) => s.removeUser);
   const changeUserData = useStore((s) => s.changeUserData);
   const currentUserIndex = useStore((s) => s.currentUserIndex);
+  const users = useStore((s) => s.users);
+
+  function switchToAccount(index: number) {
+    if (index === currentUserIndex) return;
+    useStore.getState().switchUser(index);
+    // The tabs remount for the new account (see (tabs)/_layout.tsx); land on its start screen.
+    router.replace(homePath(useStore.getState().currentUser()) as any);
+  }
 
   const changeAlerts = user?.changeAlerts !== false;
   const autoTodoFromMissing = !!user?.autoTodoFromMissing;
@@ -626,8 +636,41 @@ export default function SettingsScreen() {
           />
         </SettingsSection>
 
-        {/* Account */}
-        <SettingsSection title='Account'>
+        {/* Accounts */}
+        <SettingsSection title='Accounts'>
+          {users.map((account, index) => {
+            const name = account.name || account.username;
+            return (
+              <Pressable
+                key={accountKey(account)}
+                onPress={() => switchToAccount(index)}
+                className='flex-row items-center px-4 py-3 active:opacity-70'
+              >
+                <Avatar alt={`${name} avatar`} className='mr-3 h-8 w-8'>
+                  {account.avatar ? (
+                    <AvatarImage
+                      source={typeof account.avatar === 'string' ? { uri: account.avatar } : account.avatar}
+                    />
+                  ) : null}
+                  <AvatarFallback>
+                    <Text className='text-xs font-semibold'>{getInitials(name)}</Text>
+                  </AvatarFallback>
+                </Avatar>
+                <View className='flex-1'>
+                  <Text className='text-base font-medium' numberOfLines={1}>{name}</Text>
+                  <Text className='text-xs text-muted-foreground' numberOfLines={1}>
+                    {account.district || PLATFORM_MAPPING[account.platform] || account.username}
+                  </Text>
+                </View>
+                {index === currentUserIndex && <Icon as={Check} className='size-5 text-primary' />}
+              </Pressable>
+            );
+          })}
+          <SettingsRow
+            icon={<Icon as={UserPlus} className='size-4 text-primary' />}
+            label='Add account'
+            onPress={() => router.push('/login')}
+          />
           <SettingsRow
             icon={<Icon as={User} className='size-4 text-primary' />}
             label='Account Details'
@@ -641,15 +684,17 @@ export default function SettingsScreen() {
             <AlertDialogTrigger asChild>
               <SettingsRow
                 icon={<Icon as={LogOut} className='size-4 text-destructive' />}
-                label='Sign Out'
+                label={users.length > 1 ? `Sign out of ${displayName}` : 'Sign Out'}
                 destructive
               />
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Sign out?</AlertDialogTitle>
+                <AlertDialogTitle>Sign out of {displayName}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  You'll need to sign in again to access your account.
+                  {users.length > 1
+                    ? "This account's saved password and data are removed from this device. Your other accounts stay signed in."
+                    : "You'll need to sign in again to access your account."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -660,7 +705,8 @@ export default function SettingsScreen() {
                   variant='destructive'
                   onPress={() => {
                     if (currentUserIndex >= 0) removeUser(currentUserIndex);
-                    router.replace('/login');
+                    const next = useStore.getState().currentUser();
+                    router.replace((next ? homePath(next) : '/login') as any);
                   }}
                 >
                   <Text>Sign Out</Text>

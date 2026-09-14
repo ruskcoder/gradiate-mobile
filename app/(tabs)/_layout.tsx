@@ -1,9 +1,15 @@
 import { TabBar } from '@/components/custom/tab-bar';
+import { accountKey, useCurrentUser } from '@/lib/store';
 import { Tabs } from 'expo-router';
 
 export default function TabLayout() {
+  const user = useCurrentUser();
+
   return (
     <Tabs
+      // Tab screens load their data on mount; remount them all when the active
+      // account changes so none keeps showing the previous account's grades.
+      key={user ? accountKey(user) : 'signed-out'}
       tabBar={(props) => <TabBar {...props} />}
       screenOptions={{
         headerShown: false,

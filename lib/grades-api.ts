@@ -21,6 +21,7 @@ import { withGradeChangeDetection } from '@/lib/grade-alerts';
 import { addGradesLoad, initializeGradesStore } from '@/lib/grades-store';
 import { mergeBaseline } from '@/lib/notification-baseline';
 import {
+  accountKey,
   currentUser,
   getSession,
   setSession,
@@ -38,8 +39,7 @@ type LoginType = (typeof LOGIN_TYPES)[number];
  *  previous account's grades until a manual refresh. */
 function userScope(): string {
   const u = currentUser();
-  if (!u) return 'anon';
-  return `${u.platform}|${u.link}|${u.username}|${u.studentId || ''}`;
+  return u ? accountKey(u) : 'anon';
 }
 
 function generateCacheKey(endpoint: string, options: Record<string, any> = {}): string {

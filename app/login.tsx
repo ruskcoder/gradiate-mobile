@@ -13,8 +13,9 @@ import {
   type District,
   type LoginTitles,
 } from '@/lib/constants';
+import { clearAllCookies } from '@/lib/cookie-manager';
 import { fetchAuthMethods, fetchDistrictDetails, login } from '@/lib/grades-api';
-import { useStore } from '@/lib/store';
+import { homePath, useStore } from '@/lib/store';
 import { usePrimaryForegroundColor } from '@/lib/use-primary-foreground-color';
 import { cn } from '@/lib/utils';
 import { BlurView } from 'expo-blur';
@@ -238,6 +239,8 @@ export default function LoginScreen() {
   const setReauthRequired = useStore((s) => s.setReauthRequired);
   const changeUserData = useStore((s) => s.changeUserData);
   const [reauthActive, setReauthActive] = React.useState(() => !!reauthUsername);
+  // Signed in already, so this screen is adding another account.
+  const hadAccounts = useStore((s) => s.users.length > 0 && s.currentUserIndex !== -1);
 
   // --- Wizard navigation -----------------------------------------------------
   const [step, setStep] = React.useState<Step>(reauthActive ? 'form' : 'entry');
@@ -619,8 +622,7 @@ export default function LoginScreen() {
       setReauthRequired(null);
       setReauthActive(false);
     } else {
-      const newIndex = useStore.getState().users.length;
-      useStore.getState().addUser({
+      const newIndex = useStore.getState().addUser({
         loginType: effectiveLoginType,
         username: data.username || username,
         password,
@@ -638,7 +640,7 @@ export default function LoginScreen() {
         studentId,
         students: data.students || [],
       });
-      useStore.getState().setCurrentUserIndex(newIndex);
+      useStore.getState().switchUser(newIndex);
     }
     setMfaOpen(false);
     router.replace(
@@ -654,6 +656,7 @@ export default function LoginScreen() {
     setMsSilent(false);
     setLoading(true);
     setError(null);
+    useStore.setState({ session: {} });
     try {
       const data = await login(platform, 'microsoftSession', { link, cookies }, '');
       if (!data?.success) {
@@ -701,6 +704,9 @@ export default function LoginScreen() {
     } else {
       setLoading(true);
     }
+    // A fresh attempt must not ride the active account's portal session (the
+    // ClassLink 2FA follow-up is the exception: it resumes its own challenge).
+    if (!answeredMfa) useStore.setState({ session: {} });
 
     try {
       const details: Record<string, string> = { username, password };
@@ -804,6 +810,14 @@ export default function LoginScreen() {
           <Text className="text-black">Custom</Text>
         </Button>
       </View>
+      {hadAccounts && !reauthActive && (
+        <Button
+          variant="ghost"
+          className="w-full"
+          onPress={() => (router.canGoBack() ? router.back() : router.replace(homePath() as any))}>
+          <Text className="text-black">Cancel</Text>
+        </Button>
+      )}
     </View>
   );
 
@@ -1127,6 +1141,12 @@ export default function LoginScreen() {
               onPress={() => {
                 setError(null);
                 setMsSilent(false);
+                // The WebView's cookie jar is shared, so with another Microsoft
+                // account saved it would sign straight back into that one.
+                // Clearing it only costs that account a silent re-auth later.
+                if (useStore.getState().users.some((u) => u.loginType === 'microsoftSession')) {
+                  void clearAllCookies();
+                }
                 setMsOpen(true);
               }}>
               <MicrosoftLogo />
