@@ -15,7 +15,7 @@ import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as React from 'react';
 import { useUniwind } from 'uniwind';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -86,6 +86,14 @@ function AppContent() {
     notificationAccountKey,
     notificationsEnabled,
   ]);
+
+  // Re-lock GPA/rank/transcripts whenever the app leaves the foreground.
+  React.useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') useStore.getState().setPrivacyUnlocked(false);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Apply this year's built-in bell schedules once per account.
   React.useEffect(() => {

@@ -56,11 +56,13 @@ import {
   ClipboardPaste,
   Eraser,
   Home,
+  Lock,
   Trash2,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { buildBackup, restoreBackup } from '~/lib/backup';
+import { PrivacyPinDialog } from '~/components/custom/pin-gate';
 import { syncMissingTodos } from '~/lib/grade-alerts';
 import { useAppSettings, type NumberDisplay } from '~/lib/app-settings';
 import { sendTestGradeNotification } from '~/lib/grades-notifications-task';
@@ -247,6 +249,7 @@ export default function SettingsScreen() {
   }
 
   const defaultPage = user?.defaultPage ?? 'grades';
+  const [pinOpen, setPinOpen] = React.useState(false);
   const DEFAULT_PAGE_OPTIONS: { value: 'dashboard' | 'grades'; label: string }[] = [
     { value: 'dashboard', label: 'Dashboard' },
     { value: 'grades', label: 'Grades' },
@@ -578,6 +581,17 @@ export default function SettingsScreen() {
             }
           />
           <SettingsRow
+            icon={<Icon as={Lock} className='size-4 text-primary' />}
+            label='Privacy PIN'
+            onPress={() => setPinOpen(true)}
+            right={
+              <View className='flex-row items-center gap-1'>
+                <Text className='text-sm text-muted-foreground'>{user?.privacyPinHash ? 'On' : 'Off'}</Text>
+                <Icon as={ChevronRight} className='size-[18px] text-muted-foreground' />
+              </View>
+            }
+          />
+          <SettingsRow
             icon={<Icon as={Sparkles} className='size-4 text-primary' />}
             label='Show grade change banner'
             onPress={() => changeUserData('changeAlerts', !changeAlerts)}
@@ -625,6 +639,8 @@ export default function SettingsScreen() {
             onPress={confirmWipeDevice}
           />
         </SettingsSection>
+
+        <PrivacyPinDialog open={pinOpen} onOpenChange={setPinOpen} />
 
         {/* Account */}
         <SettingsSection title='Account'>

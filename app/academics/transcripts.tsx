@@ -1,3 +1,4 @@
+import { PinGate } from '@/components/custom/pin-gate';
 import { ScreenHeader } from '@/components/custom/screen-header';
 import { SimpleTable } from '@/components/custom/simple-table';
 import { Spinner } from '@/components/custom/spinner';
@@ -40,6 +41,14 @@ function StatCard({
 }
 
 export default function TranscriptsScreen() {
+  return (
+    <PinGate title="Transcripts">
+      <TranscriptsContent />
+    </PinGate>
+  );
+}
+
+function TranscriptsContent() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);

@@ -127,6 +127,8 @@ export interface User {
   defaultPage?: 'dashboard' | 'grades';
   // Which built-in bell schedule set has been applied (see lib/bell-schedules).
   bellSchedulesVersion?: number;
+  // Hash of the PIN guarding GPA/rank/transcripts; '' when off (see lib/privacy-pin).
+  privacyPinHash?: string;
   gradesStore: {
     initialTerm: string;
     termList: string[];
@@ -278,6 +280,7 @@ const DEFAULT_USER: User = {
   activeBellSchedule: '',
   defaultPage: 'grades',
   bellSchedulesVersion: 0,
+  privacyPinHash: '',
   gradesStore: {
     initialTerm: '',
     termList: [],
@@ -353,6 +356,11 @@ interface UserStore {
    *  shown as a dismissible banner on the Grades tab. */
   gradeChanges: GradeChange[];
   setGradeChanges: (changes: GradeChange[]) => void;
+
+  /** Session-only (not persisted) — privacy PIN entered since the app was last
+   *  foregrounded. Cleared on account switch and when the app backgrounds. */
+  privacyUnlocked: boolean;
+  setPrivacyUnlocked: (value: boolean) => void;
 }
 
 export const useStore = create<UserStore>()(
@@ -377,6 +385,9 @@ export const useStore = create<UserStore>()(
       gradeChanges: [],
       setGradeChanges: (changes) => set({ gradeChanges: changes }),
 
+      privacyUnlocked: false,
+      setPrivacyUnlocked: (value) => set({ privacyUnlocked: value }),
+
       currentUser: (): User | null => {
         const { users, currentUserIndex } = get();
         if (users.length === 0 || currentUserIndex < 0 || currentUserIndex >= users.length) {
@@ -390,7 +401,7 @@ export const useStore = create<UserStore>()(
       },
 
       setCurrentUserIndex: (index: number) => {
-        set({ currentUserIndex: index });
+        set({ currentUserIndex: index, privacyUnlocked: false });
       },
 
       addUser: (user?: Partial<User>) => {
@@ -420,6 +431,7 @@ export const useStore = create<UserStore>()(
             session: {},
             cache: {},
             cacheTimestamp: null,
+            privacyUnlocked: false,
           };
         });
       },

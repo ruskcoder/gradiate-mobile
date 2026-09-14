@@ -1,3 +1,4 @@
+import { PinPromptDialog, usePrivacyLock } from '@/components/custom/pin-gate';
 import { ScreenHeader } from '@/components/custom/screen-header';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -28,6 +29,7 @@ import {
   Check,
   GraduationCap,
   ListTodo,
+  Lock,
   Plus,
   Share2,
   Target,
@@ -90,6 +92,25 @@ function GpaWidget({ classes }: { classes: InsightClass[] }) {
       setLoading(false);
     }
   };
+
+  const { locked } = usePrivacyLock();
+  const [promptOpen, setPromptOpen] = React.useState(false);
+  if (locked) {
+    return (
+      <Widget title="GPA Projection" icon={GraduationCap}>
+        <View className="flex-row items-center justify-between gap-2">
+          <View className="flex-1 flex-row items-center gap-2">
+            <Icon as={Lock} className="size-4 text-muted-foreground" />
+            <Text className="flex-1 text-sm text-muted-foreground">Locked with your privacy PIN.</Text>
+          </View>
+          <Button size="sm" variant="outline" onPress={() => setPromptOpen(true)}>
+            <Text>Unlock</Text>
+          </Button>
+        </View>
+        <PinPromptDialog open={promptOpen} onOpenChange={setPromptOpen} />
+      </Widget>
+    );
+  }
 
   const cumulative = transcript ? combineWithTranscript(transcript.weighted, transcript.courses, weighted) : null;
 
@@ -339,10 +360,11 @@ function TodosWidget() {
 export default function OverviewScreen() {
   const insets = useSafeAreaInsets();
   const user = useCurrentUser();
+  const { locked } = usePrivacyLock();
   const { term, loadedAt, classes } = React.useMemo(() => getCurrentClasses(user), [user]);
 
   const share = (hideNumbers: boolean) => {
-    const gpa = projectGpa(user, classes)?.gpa ?? null;
+    const gpa = locked ? null : (projectGpa(user, classes)?.gpa ?? null);
     Share.share({ message: shareSummary(classes, { hideNumbers, gpa }) }).catch(() => {});
   };
 

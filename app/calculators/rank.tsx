@@ -1,3 +1,4 @@
+import { PinGate } from '@/components/custom/pin-gate';
 import { ScreenHeader } from '@/components/custom/screen-header';
 import { Spinner } from '@/components/custom/spinner';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,14 @@ function StatCard({
 }
 
 export default function RankCalculatorScreen() {
+  return (
+    <PinGate title="Rank Calculator">
+      <RankCalculatorContent />
+    </PinGate>
+  );
+}
+
+function RankCalculatorContent() {
   const insets = useSafeAreaInsets();
   const user = useCurrentUser();
   const changeUserData = useStore((s) => s.changeUserData);

@@ -1,3 +1,4 @@
+import { PinGate } from '@/components/custom/pin-gate';
 import { ScreenHeader } from '@/components/custom/screen-header';
 import { Spinner } from '@/components/custom/spinner';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,14 @@ function StatCard({
 }
 
 export default function GPACalculatorScreen() {
+  return (
+    <PinGate title="GPA Calculator">
+      <GPACalculatorContent />
+    </PinGate>
+  );
+}
+
+function GPACalculatorContent() {
   const insets = useSafeAreaInsets();
   const user = useCurrentUser();
   const changeUserData = useStore((s) => s.changeUserData);
