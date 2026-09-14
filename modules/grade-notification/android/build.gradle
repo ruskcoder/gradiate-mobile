@@ -18,4 +18,9 @@ dependencies {
   // NotificationCompat / NotificationManagerCompat / ContextCompat.getColor.
   // Same coordinate expo-notifications pulls in, so Gradle resolves one version.
   implementation 'androidx.core:core:1.17.0'
+
+  // GradeCheckWorker: WorkManager at the version expo-background-task uses, and
+  // that module itself for the task consumer the worker executes.
+  implementation 'androidx.work:work-runtime-ktx:2.9.1'
+  implementation project(':expo-background-task')
 }

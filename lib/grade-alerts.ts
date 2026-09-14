@@ -1,4 +1,4 @@
-import { diffGrades, getCurrentClasses, getMissingAssignments } from '@/lib/insights';
+import { diffGrades, getCurrentClasses, getMissingAssignments, mergeGradeChanges } from '@/lib/insights';
 import type { GradeChange } from '@/lib/store';
 import { useStore } from '@/lib/store';
 
@@ -49,8 +49,9 @@ export function withGradeChangeDetection(term: string, classes: any[], merge: ()
   merge();
   try {
     const state = useStore.getState();
+    // Shown as badges on the grades list (see GradesItem), cleared per class on open.
     if (changes.length && state.currentUser()?.changeAlerts !== false) {
-      state.setGradeChanges(changes);
+      state.setGradeChanges(mergeGradeChanges(state.gradeChanges, changes));
     }
     syncMissingTodos();
   } catch (e) {

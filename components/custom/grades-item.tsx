@@ -5,6 +5,10 @@ import * as React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useUniwind } from 'uniwind';
 import type { NumberDisplay } from '@/lib/app-settings';
+import { Icon } from '@/components/ui/icon';
+import { changeBadge } from '@/lib/insights';
+import { useStore } from '@/lib/store';
+import { Star } from 'lucide-react-native';
 
 interface GradeColorInfo {
   grade: string;
@@ -67,6 +71,41 @@ export function gradeAndColor(
 
 export type GradesVariant = 'list' | 'card';
 
+/** Pill showing how far a class average moved since it was last opened. */
+function DeltaBadge({ delta, className }: { delta: number | null | undefined; className: string }) {
+  if (delta === null || delta === undefined) return null;
+  const up = delta > 0;
+  return (
+    <View
+      pointerEvents="none"
+      className={cn('absolute z-10 rounded-full px-1.5 py-0.5', up ? 'bg-green-600' : 'bg-red-600', className)}>
+      <Text className="text-[11px] font-semibold leading-none text-white">
+        {up ? '+' : ''}
+        {delta.toFixed(2)}
+      </Text>
+    </View>
+  );
+}
+
+/** Star on the item's top-left corner when new assignments were posted. */
+function NewAssignmentsBadge({ count }: { count: number | undefined }) {
+  if (!count) return null;
+  return (
+    <View
+      pointerEvents="none"
+      className="absolute -left-1.5 -top-1.5 z-10 h-5 min-w-5 flex-row items-center justify-center gap-0.5 rounded-full bg-amber-400 px-1">
+      <Icon as={Star} className="size-3 text-amber-950" fill="#451a03" />
+      {count > 1 && <Text className="text-[10px] font-bold leading-none text-amber-950">{count}</Text>}
+    </View>
+  );
+}
+
+/** This class's pending change, if any (session-only, set by grade-alerts). */
+function useChange(courseName: string, id: string) {
+  const change = useStore((s) => s.gradeChanges.find((c) => c.key === `${id}|${courseName}`));
+  return changeBadge(change);
+}
+
 interface GradesItemProps {
   courseName: string;
   id: string;
@@ -87,6 +126,7 @@ export function GradesItem({
   numberDisplay = 'decimal',
 }: GradesItemProps) {
   const { theme } = useUniwind();
+  const change = useChange(courseName, id);
   const { grade: gradeValue, numericGrade, gradeColor, textColor, bgColor } = gradeAndColor(
     grade,
     null,
@@ -110,6 +150,7 @@ export function GradesItem({
     const useThemeColor = bgColor.startsWith('var');
 
     return (
+      <View className="relative w-full">
       <Pressable
         onPress={onPress}
         className="w-full overflow-hidden rounded-xl border border-border bg-card active:bg-accent">
@@ -123,6 +164,7 @@ export function GradesItem({
             pointerEvents="none"
             style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]}
           />
+          <DeltaBadge delta={change?.delta} className="right-2 top-2" />
           <Text className={cn('text-[2.5rem] font-semibold leading-10', textColor)}>
             {displayGrade}
           </Text>
@@ -143,10 +185,13 @@ export function GradesItem({
           </Text>
         </View>
       </Pressable>
+      <NewAssignmentsBadge count={change?.newCount} />
+      </View>
     );
   }
 
   return (
+    <View className="relative w-full">
     <Pressable
       onPress={onPress}
       className="w-full flex-row items-center justify-between rounded-xl border border-border bg-card p-3 py-2 active:bg-accent">
@@ -171,6 +216,9 @@ export function GradesItem({
         </Text>
       </View>
     </Pressable>
+    <NewAssignmentsBadge count={change?.newCount} />
+    <DeltaBadge delta={change?.delta} className="-right-1.5 -top-1.5" />
+    </View>
   );
 }
 

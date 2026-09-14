@@ -5,6 +5,7 @@ import { getClasses } from '@/lib/grades-api';
 // import { beginFetchProgress, FETCH_CANCELLED, type FetchProgress } from '@/lib/fetch-progress';
 import { loadBaseline } from '@/lib/notification-baseline';
 import { presentGradeImageNotification } from '@/lib/grade-notification-image';
+import { consumePushTrigger, logCheck, type GradeCheckTrigger } from '@/lib/grade-check-log';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
@@ -31,6 +32,18 @@ export const NOTIFICATION_SOUND = 'notification.wav';
 /** Shared by both presentation paths so the row header reads the same whether
  *  the notification was drawn natively or scheduled through expo. */
 const NOTIFICATION_TITLE = 'Grade updated';
+
+/**
+ * How long a background check may run before its fetch is abandoned. A fetch is
+ * a full portal login plus scrape, so this is generous — but it has to exist.
+ * The request is a raw XHR with no timeout of its own, and a background process
+ * can lose its network to Doze or be frozen mid-request. Without a deadline such
+ * a check never settled, so it never told the task manager it had finished, and
+ * the hourly worker — which only schedules its next run once the current one
+ * reports back — quietly stopped rescheduling. Well under WorkManager's
+ * 10-minute cap, so the check always ends on our terms.
+ */
+const CHECK_DEADLINE_MS = 3 * 60 * 1000;
 
 /** Creates (or refreshes) the grades channel. Shared with `push-subscribe`, so
  *  whichever path runs first defines the channel identically. */
@@ -150,6 +163,51 @@ function isBlankGrade(v: any): boolean {
   );
 }
 
+/** The check in progress, if any. See `checkGradesAndNotify`. */
+let inFlight: Promise<boolean> | null = null;
+
+/**
+ * Runs one background grade check and notifies on any change. Resolves true if
+ * anything was notified.
+ *
+ * Single-flight: the push trigger and the hourly fallback can land together (a
+ * deferred push released just as the hourly run starts). Two interleaved checks
+ * each clear the cache and read the baseline around the other's write, so they
+ * either double-notify or one diffs against the other's fresh baseline and sees
+ * nothing. A caller that arrives mid-check shares that check's result instead.
+ */
+export function checkGradesAndNotify(trigger: GradeCheckTrigger): Promise<boolean> {
+  if (!inFlight) {
+    inFlight = runLoggedCheck(trigger).finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+type CheckResult = { changed: boolean; outcome: string };
+
+async function runLoggedCheck(trigger: GradeCheckTrigger): Promise<boolean> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), CHECK_DEADLINE_MS);
+  let outcome = 'error';
+  try {
+    const result = await runCheck(controller.signal);
+    // An aborted fetch ends like an empty one, so name the real reason.
+    outcome = controller.signal.aborted ? 'timed out' : result.outcome;
+    return result.changed;
+  } catch (e) {
+    outcome = `error: ${e instanceof Error ? e.message : String(e)}`;
+    throw e;
+  } finally {
+    clearTimeout(deadline);
+    // Awaited for the same reason `mergeBaseline` is: a headless run is torn
+    // down moments after its task returns, taking unflushed writes with it.
+    await logCheck(trigger, startedAt, outcome);
+  }
+}
+
 /**
  * Fetches the freshest classes and diffs each class's average — for EVERY term
  * that's currently active — against the last stored snapshot of that term,
@@ -165,7 +223,7 @@ function isBlankGrade(v: any): boolean {
  * The previous averages are snapshotted BEFORE the fetch, because `getClasses`
  * writes the fresh data straight back into the store as a side effect.
  */
-export async function checkGradesAndNotify(): Promise<boolean> {
+async function runCheck(signal: AbortSignal): Promise<CheckResult> {
   // This runs in the background JS context, where the store rehydrates from
   // AsyncStorage but the password + 2FA answer live in the OS keystore (stripped
   // from the persisted blob). Wait for both before fetching, or the request goes
@@ -183,14 +241,17 @@ export async function checkGradesAndNotify(): Promise<boolean> {
   await hydrateSecureCredentials();
 
   const user = currentUser();
+  if (!user) {
+    return { changed: false, outcome: 'skipped: signed out' };
+  }
   // Accounts saved before this preference existed have `undefined`; throughout
   // the UI that means enabled, so background execution must match.
-  if (!user || user.notificationsEnabled === false) {
-    return false;
+  if (user.notificationsEnabled === false) {
+    return { changed: false, outcome: 'skipped: notifications off' };
   }
   // Nothing to fetch with if credentials never made it back from the keystore.
   if (user.loginType === 'credentials' && (!user.username || !user.password)) {
-    return false;
+    return { changed: false, outcome: 'skipped: no saved password' };
   }
   // Same `undefined means on` convention as `notificationsEnabled` above, so
   // accounts saved before this preference existed get the image by default.
@@ -202,13 +263,14 @@ export async function checkGradesAndNotify(): Promise<boolean> {
   // empty history and skipped every class as "previously blank". Reading it here
   // is safe against the write inside `getClasses` below, which happens after.
   const baselineBefore = await loadBaseline();
+  const hadBaseline = Object.keys(baselineBefore).length > 0;
   const prevAverage = (term: string, key: string) => baselineBefore?.[term]?.[key];
 
   // Don't notify off a stale cached snapshot — force a live fetch.
   useStore.getState().clearCache();
 
   let chunk: any = null;
-  for await (const c of getClasses()) {
+  for await (const c of getClasses(undefined, signal)) {
     if (c?.success === true) chunk = c;
   }
   // --- progress notification (disabled) -------------------------------------
@@ -216,14 +278,14 @@ export async function checkGradesAndNotify(): Promise<boolean> {
   // into the silent progress notification and honours its Cancel button.
   //   const progress = beginFetchProgress();
   //   try {
-  //     const chunk = await streamClassesWithProgress(progress);
-  //     ... everything below, up to `return changed`, indented one level ...
+  //     const chunk = await streamClassesWithProgress(progress, signal);
+  //     ... everything below, up to the final return, indented one level ...
   //   } finally {
   //     progress.end();
   //   }
   // --------------------------------------------------------------------------
   if (!chunk || !Array.isArray(chunk.classes)) {
-    return false;
+    return { changed: false, outcome: 'no data' };
   }
 
   // Every currently-active term, finest last. Portals that don't send the set
@@ -235,7 +297,7 @@ export async function checkGradesAndNotify(): Promise<boolean> {
         ? [chunk.term]
         : [];
   if (currentTerms.length === 0) {
-    return false;
+    return { changed: false, outcome: 'no current term' };
   }
   const multi = currentTerms.length > 1;
 
@@ -247,7 +309,7 @@ export async function checkGradesAndNotify(): Promise<boolean> {
     `baselineTerms=${JSON.stringify(Object.keys(baselineBefore))}`
   );
 
-  let changed = false;
+  let changes = 0;
   for (const term of currentTerms) {
     for (const course of chunk.classes) {
       const key = courseKey(course.course, course.name);
@@ -268,7 +330,7 @@ export async function checkGradesAndNotify(): Promise<boolean> {
       if (String(oldAverage) === String(newAverage)) continue;
 
       console.log(`[grades-check] CHANGED ${key} @${term}: ${oldAverage} -> ${newAverage}`);
-      changed = true;
+      changes++;
       await notifyGradeChange(
         course.name,
         multi ? term : null,
@@ -279,7 +341,12 @@ export async function checkGradesAndNotify(): Promise<boolean> {
     }
   }
 
-  return changed;
+  if (changes > 0) {
+    return { changed: true, outcome: `notified ${changes} change${changes === 1 ? '' : 's'}` };
+  }
+  // A first run has nothing to compare against; it only records the baseline
+  // (inside `getClasses`), which is worth distinguishing from "nothing moved".
+  return { changed: false, outcome: hadBaseline ? 'no change' : 'first check, baseline saved' };
 }
 
 /*
@@ -296,11 +363,12 @@ export async function checkGradesAndNotify(): Promise<boolean> {
  *      Needs a fresh `expo prebuild` + build — a new Gradle project can't ship
  *      as an OTA update.
  *   2. Uncomment the body of `lib/fetch-progress.ts`.
- *   3. Uncomment the `signal` plumbing in `streamPost` / `getClasses` in
- *      `lib/grades-api.ts` (three spots, each marked).
+ *   3. `getClasses` already takes a `signal` — the check's deadline uses it.
+ *      The helper below creates its own controller for Cancel; make it also
+ *      abort when the deadline `signal` passed in does, so both stop the same
+ *      request.
  *   4. Uncomment the import at the top of this file, the block marked
- *      "progress notification (disabled)" in `checkGradesAndNotify`, and the
- *      helper below.
+ *      "progress notification (disabled)" in `runCheck`, and the helper below.
  *
  * Drives the `getClasses` stream, mirroring every progress chunk into the
  * notification, and returns the final `success` chunk — or `null` if the user
@@ -313,8 +381,9 @@ export async function checkGradesAndNotify(): Promise<boolean> {
  * then tears the request down so the generator can finish.
  * ===========================================================================
  *
- * async function streamClassesWithProgress(progress: FetchProgress): Promise<any | null> {
+ * async function streamClassesWithProgress(progress: FetchProgress, deadline: AbortSignal): Promise<any | null> {
  *   const controller = new AbortController();
+ *   deadline.addEventListener('abort', () => controller.abort());
  *   const stream = getClasses(undefined, controller.signal);
  *   let chunk: any = null;
  *
@@ -344,15 +413,32 @@ export async function checkGradesAndNotify(): Promise<boolean> {
  * }
  */
 
+/**
+ * The hourly WorkManager fallback — and, on Android builds with
+ * `GradeCheckWorker`, the push trigger too: the push handler queues a job that
+ * runs this same task rather than fetching inline (see `push-subscribe.ts`).
+ */
 TaskManager.defineTask(GRADES_NOTIFICATIONS_TASK, async () => {
   try {
-    await checkGradesAndNotify();
+    const trigger: GradeCheckTrigger = (await consumePushTrigger()) ? 'push' : 'hourly';
+    await checkGradesAndNotify(trigger);
     const BackgroundTask = await import('expo-background-task');
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     console.error('Grades notification background task failed', e);
     const BackgroundTask = await import('expo-background-task');
     return BackgroundTask.BackgroundTaskResult.Failed;
+  } finally {
+    // A rotated or server-pruned push token silently ends the server's triggers
+    // until the app is next opened. Re-registering from here, at most daily,
+    // heals that without anyone opening the app. Imported lazily because
+    // `push-subscribe` imports this module.
+    try {
+      const { refreshPushSubscriptionIfStale } = await import('@/lib/push-subscribe');
+      await refreshPushSubscriptionIfStale();
+    } catch (e) {
+      console.warn('Background push re-subscribe failed', e);
+    }
   }
 });
 

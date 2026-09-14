@@ -36,6 +36,7 @@ export interface TodoItem {
 
 /** One class whose grade moved (or got new assignments) since the last load. */
 export interface GradeChange {
+  key: string; // `${course}|${name}`
   name: string;
   from: number | null;
   to: number | null;
@@ -356,6 +357,8 @@ interface UserStore {
    *  shown as a dismissible banner on the Grades tab. */
   gradeChanges: GradeChange[];
   setGradeChanges: (changes: GradeChange[]) => void;
+  /** Clear one class's badges once it has been opened. */
+  dismissGradeChange: (key: string) => void;
 
   /** Session-only (not persisted) — privacy PIN entered since the app was last
    *  foregrounded. Cleared on account switch and when the app backgrounds. */
@@ -384,6 +387,8 @@ export const useStore = create<UserStore>()(
 
       gradeChanges: [],
       setGradeChanges: (changes) => set({ gradeChanges: changes }),
+      dismissGradeChange: (key) =>
+        set((state) => ({ gradeChanges: state.gradeChanges.filter((c) => c.key !== key) })),
 
       privacyUnlocked: false,
       setPrivacyUnlocked: (value) => set({ privacyUnlocked: value }),
@@ -401,7 +406,7 @@ export const useStore = create<UserStore>()(
       },
 
       setCurrentUserIndex: (index: number) => {
-        set({ currentUserIndex: index, privacyUnlocked: false });
+        set({ currentUserIndex: index, privacyUnlocked: false, gradeChanges: [] });
       },
 
       addUser: (user?: Partial<User>) => {

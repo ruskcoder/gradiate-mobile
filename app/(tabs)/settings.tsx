@@ -1,6 +1,6 @@
 // app/settings.tsx
 import * as React from 'react';
-import { View, ScrollView, Pressable, Alert, Share } from 'react-native';
+import { View, ScrollView, Pressable, Alert, Share, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -50,6 +50,8 @@ import {
   Sparkles,
   Image as ImageIcon,
   BellRing,
+  History,
+  BatteryWarning,
   ListPlus,
   Share2,
   Copy,
@@ -67,6 +69,7 @@ import { syncMissingTodos } from '~/lib/grade-alerts';
 import { useAppSettings, type NumberDisplay } from '~/lib/app-settings';
 import { sendTestGradeNotification } from '~/lib/grades-notifications-task';
 import { canRenderGradeImage } from '~/lib/grade-notification-image';
+import { describeGradeCheckLog, readGradeCheckLog } from '~/lib/grade-check-log';
 import { useColorScheme } from '~/lib/useColorScheme';
 import { useCurrentUser, useStore } from '~/lib/store';
 import { PLATFORM_MAPPING } from '~/lib/constants';
@@ -193,6 +196,32 @@ export default function SettingsScreen() {
     } finally {
       setSendingTest(false);
     }
+  }
+
+  /** Background checks run headless and leave no trace when nothing changed, so
+   *  this is the only on-device way to see whether pushes and hourly runs are
+   *  actually happening. */
+  async function showCheckHistory() {
+    const entries = await readGradeCheckLog();
+    Alert.alert(
+      'Background checks',
+      entries.length
+        ? describeGradeCheckLog(entries.slice(0, 12))
+        : 'Nothing recorded yet. Pushes and hourly checks appear here once they run.'
+    );
+  }
+
+  /** OEM battery management (Samsung's especially) is the most common reason a
+   *  background check never gets to run, and only the user can lift it. */
+  function openBatterySettings() {
+    Alert.alert(
+      'Allow background activity',
+      'For reliable grade notifications, open App info → Battery and choose Unrestricted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open settings', onPress: () => void Linking.openSettings() },
+      ]
+    );
   }
 
   const user = useCurrentUser();
@@ -444,6 +473,24 @@ export default function SettingsScreen() {
             label={sendingTest ? 'Sending…' : 'Send test notification'}
             onPress={sendTestNotification}
           />
+          <SettingsRow
+            icon={<Icon as={History} className='size-4 text-primary' />}
+            label='Background check history'
+            onPress={showCheckHistory}
+          />
+          {/* An array rather than `cond && <Row/>`: SettingsSection draws a
+              separator before every child it maps, and a `false` child still
+              gets one, leaving a stray line on iOS. An empty array maps to nothing. */}
+          {Platform.OS === 'android'
+            ? [
+                <SettingsRow
+                  key='battery'
+                  icon={<Icon as={BatteryWarning} className='size-4 text-primary' />}
+                  label='Allow background activity'
+                  onPress={openBatterySettings}
+                />,
+              ]
+            : []}
           <SettingsRow
             icon={<Icon as={Moon} className='size-4 text-primary' />}
             label='Theme'

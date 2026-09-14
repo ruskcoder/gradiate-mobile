@@ -119,20 +119,21 @@ function handleAuthError(response: Response, data: any): void {
  * SSE-style chunks incrementally and surface progress in real time, matching
  * the web app's `getReader()` behavior.
  *
- * DISABLED (1/3) — cancellation support for the progress notification. See the
- * note at the bottom of `lib/grades-notifications-task.ts`. An aborted `signal`
- * ends the stream the same way a complete response does — the request is torn
- * down and the generator simply runs out of chunks — rather than throwing.
- * Aborting has to reach the XHR directly like this: calling `.return()` on the
- * generator while it is parked waiting for bytes only queues the request behind
- * the pending `next()`, so a hung fetch would never let go.
+ * An aborted `signal` ends the stream the same way a complete response does —
+ * the request is torn down and the generator simply runs out of chunks — rather
+ * than throwing. The background grade check uses it as a deadline: an XHR has no
+ * timeout of its own, so a request stalled by Doze or a frozen process would
+ * otherwise never settle. Aborting has to reach the XHR directly like this:
+ * calling `.return()` on the generator while it is parked waiting for bytes only
+ * queues the request behind the pending `next()`, so a hung fetch would never
+ * let go.
  */
 async function* streamPost(
   endpoint: string,
-  body: any
-  // signal?: AbortSignal
+  body: any,
+  signal?: AbortSignal
 ): AsyncGenerator<any> {
-  // if (signal?.aborted) return;
+  if (signal?.aborted) return;
 
   const xhr = new XMLHttpRequest();
   const queue: any[] = [];
@@ -202,13 +203,12 @@ async function* streamPost(
     wakeUp();
   };
 
-  // DISABLED (2/3) — cancellation support for the progress notification.
-  // const onAbort = () => {
-  //   xhr.abort();
-  //   finished = true;
-  //   wakeUp();
-  // };
-  // signal?.addEventListener('abort', onAbort);
+  const onAbort = () => {
+    xhr.abort();
+    finished = true;
+    wakeUp();
+  };
+  signal?.addEventListener('abort', onAbort);
 
   xhr.send(JSON.stringify(body));
 
@@ -224,7 +224,7 @@ async function* streamPost(
       });
     }
   } finally {
-    // signal?.removeEventListener('abort', onAbort);
+    signal?.removeEventListener('abort', onAbort);
     if (xhr.readyState !== XMLHttpRequest.DONE) xhr.abort();
   }
 }
@@ -432,11 +432,10 @@ export function getAttendance(date?: string) {
   return fetchEndpoint(ATTENDANCE_ENDPOINT, 'attendance', { options: { date: date || '' } });
 }
 
-/** DISABLED (3/3) — `signal` aborts the in-flight stream; the generator then
- *  finishes normally without ever yielding a `success` chunk. Used by the
- *  background grade check so its progress notification's Cancel button can drop
- *  a running fetch. Pass it through to `streamPost` below when re-enabling. */
-export async function* getClasses(term?: string /*, signal?: AbortSignal */) {
+/** `signal` aborts the in-flight stream; the generator then finishes normally
+ *  without ever yielding a `success` chunk. The background grade check passes
+ *  one to put a deadline on the fetch. */
+export async function* getClasses(term?: string, signal?: AbortSignal) {
   const user = await userWithCredentials();
   const session = getSession();
   if (!user) {
@@ -501,7 +500,7 @@ export async function* getClasses(term?: string /*, signal?: AbortSignal */) {
   }
 
   try {
-    for await (const data of streamPost(endpoint, body /*, signal */)) {
+    for await (const data of streamPost(endpoint, body, signal)) {
       // A `success: false` chunk arrives over a 200 response (the stream itself
       // succeeded), so `streamPost` never throws — check it here, otherwise an
       // invalid-password stream would be silently ignored and never trigger the

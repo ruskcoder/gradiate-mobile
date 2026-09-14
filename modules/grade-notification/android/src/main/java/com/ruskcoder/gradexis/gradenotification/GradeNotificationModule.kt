@@ -68,6 +68,15 @@ class GradeNotificationModule : Module() {
     AsyncFunction("present") { title: String, body: String, grade: String, delta: String?, color: String, channelId: String, sound: String? ->
       present(title, body, grade, delta, color, channelId, sound)
     }
+
+    /**
+     * Queues a background grade check under WorkManager. Called by the silent
+     * push handler, which has to return inside FCM's short window — see
+     * `GradeCheckWorker` for why the check itself can't run there.
+     */
+    AsyncFunction("enqueueGradeCheck") {
+      GradeCheckWorker.enqueue(context())
+    }
   }
 
   private fun present(
