@@ -359,6 +359,9 @@ interface UserStore {
   setGradeChanges: (changes: GradeChange[]) => void;
   /** Clear one class's badges once it has been opened. */
   dismissGradeChange: (key: string) => void;
+  /** Session-only — changes whose class has been opened, kept so the class
+   *  screen can still star that class's new assignments. */
+  viewedGradeChanges: Record<string, GradeChange>;
 
   /** Session-only (not persisted) — privacy PIN entered since the app was last
    *  foregrounded. Cleared on account switch and when the app backgrounds. */
@@ -387,8 +390,22 @@ export const useStore = create<UserStore>()(
 
       gradeChanges: [],
       setGradeChanges: (changes) => set({ gradeChanges: changes }),
+      viewedGradeChanges: {},
       dismissGradeChange: (key) =>
-        set((state) => ({ gradeChanges: state.gradeChanges.filter((c) => c.key !== key) })),
+        set((state) => {
+          const change = state.gradeChanges.find((c) => c.key === key);
+          if (!change) return {};
+          const prev = state.viewedGradeChanges[key];
+          return {
+            gradeChanges: state.gradeChanges.filter((c) => c.key !== key),
+            viewedGradeChanges: {
+              ...state.viewedGradeChanges,
+              [key]: prev
+                ? { ...change, newAssignments: [...new Set([...prev.newAssignments, ...change.newAssignments])] }
+                : change,
+            },
+          };
+        }),
 
       privacyUnlocked: false,
       setPrivacyUnlocked: (value) => set({ privacyUnlocked: value }),
@@ -406,7 +423,7 @@ export const useStore = create<UserStore>()(
       },
 
       setCurrentUserIndex: (index: number) => {
-        set({ currentUserIndex: index, privacyUnlocked: false, gradeChanges: [] });
+        set({ currentUserIndex: index, privacyUnlocked: false, gradeChanges: [], viewedGradeChanges: {} });
       },
 
       addUser: (user?: Partial<User>) => {

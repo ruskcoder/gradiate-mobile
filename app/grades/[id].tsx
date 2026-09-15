@@ -9,6 +9,7 @@ import { Text } from '@/components/ui/text';
 import { getSingleClass } from '@/lib/grades-api';
 import { getLatestGradesLoad, addGradesLoad, reconstructClassDetailFromHistory, hasClassDetailInStorage } from '@/lib/grades-store';
 import { transformGroupsToCategories } from '@/lib/utils';
+import { useStore } from '@/lib/store';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Calculator, HardDriveDownload } from 'lucide-react-native';
 import * as React from 'react';
@@ -50,6 +51,11 @@ export default function GradesDetailScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  // Assignments that appeared in the latest load get a star (set when the class
+  // was opened from the grades list — see dismissGradeChange).
+  const viewedChange = useStore((s) => s.viewedGradeChanges[`${params.id}|${params.name ?? ''}`]);
+  const newNames = React.useMemo(() => new Set(viewedChange?.newAssignments ?? []), [viewedChange]);
 
   const [detail, setDetail] = React.useState<ClassDetail | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -286,7 +292,7 @@ export default function GradesDetailScreen() {
                     {termScores.length > 0 ? (
                       <View className="gap-2">
                         {termScores.map((score, i) => (
-                          <AssignmentCard key={i} score={score} />
+                          <AssignmentCard key={i} score={score} isNew={newNames.has(score.name)} />
                         ))}
                       </View>
                     ) : (
@@ -320,7 +326,7 @@ export default function GradesDetailScreen() {
                 <Text className="text-lg font-semibold">Assignments</Text>
                 <View className="gap-2">
                   {detail.scores.map((score, i) => (
-                    <AssignmentCard key={i} score={score} />
+                    <AssignmentCard key={i} score={score} isNew={newNames.has(score.name)} />
                   ))}
                 </View>
               </View>

@@ -1,7 +1,9 @@
 import { AssignmentDetailDialog } from '@/components/custom/assignment-detail-dialog';
 import { gradeAndColor } from '@/components/custom/grades-item';
 import { AlertDialog, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
+import { Star } from 'lucide-react-native';
 import { useAppSettings } from '@/lib/app-settings';
 import { categoryColor } from '@/lib/grade-category-color';
 import { formatGrade } from '@/lib/grade-display';
@@ -41,8 +43,11 @@ export const AssignmentCard = React.memo(function AssignmentCard({
   onRemove,
   onToggleExcluded,
   onEditPercentage,
+  isNew = false,
 }: {
   score: AssignmentScore;
+  /** Star the card's top-left corner — the assignment appeared in the latest load. */
+  isNew?: boolean;
   /** When set, renders a green/red/gray delta badge showing how much this
    *  assignment shifts the course average (see Impacts). */
   impactBadge?: number;
@@ -71,6 +76,7 @@ export const AssignmentCard = React.memo(function AssignmentCard({
   const isStruck = isDisabled || score.badges.includes('dropped');
 
   return (
+    <View className="relative">
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Pressable className="rounded-lg border border-border bg-card p-2 active:bg-accent">
@@ -133,5 +139,14 @@ export const AssignmentCard = React.memo(function AssignmentCard({
         onEditPercentage={onEditPercentage}
       />
     </AlertDialog>
+    {isNew && (
+      // Centered on the card's top-left corner.
+      <View
+        pointerEvents="none"
+        className="absolute -left-2.5 -top-2.5 z-10 h-5 w-5 items-center justify-center rounded-full bg-amber-400">
+        <Icon as={Star} className="size-3 text-amber-950" fill="#451a03" />
+      </View>
+    )}
+    </View>
   );
 });

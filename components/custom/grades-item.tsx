@@ -5,10 +5,8 @@ import * as React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useUniwind } from 'uniwind';
 import type { NumberDisplay } from '@/lib/app-settings';
-import { Icon } from '@/components/ui/icon';
 import { changeBadge } from '@/lib/insights';
 import { useStore } from '@/lib/store';
-import { Star } from 'lucide-react-native';
 
 interface GradeColorInfo {
   grade: string;
@@ -98,17 +96,6 @@ function IdLine({ id, delta }: { id: string; delta: number | null | undefined })
   );
 }
 
-/** Star centered on the item's top-left corner when new assignments were posted. */
-function NewAssignmentsBadge({ count }: { count: number | undefined }) {
-  if (!count) return null;
-  return (
-    <View
-      pointerEvents="none"
-      className="absolute -left-2.5 -top-2.5 z-10 h-5 w-5 items-center justify-center rounded-full bg-amber-400">
-      <Icon as={Star} className="size-3 text-amber-950" fill="#451a03" />
-    </View>
-  );
-}
 
 /** This class's pending change, if any (session-only, set by grade-alerts). */
 function useChange(courseName: string, id: string) {
@@ -192,7 +179,6 @@ export function GradesItem({
           <IdLine id={id} delta={change?.delta} />
         </View>
       </Pressable>
-      <NewAssignmentsBadge count={change?.newCount} />
       </View>
     );
   }
@@ -221,7 +207,6 @@ export function GradesItem({
         </Text>
       </View>
     </Pressable>
-    <NewAssignmentsBadge count={change?.newCount} />
     </View>
   );
 }
