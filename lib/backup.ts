@@ -14,6 +14,8 @@ const PORTABLE_KEYS: (keyof User)[] = [
   'showPageTitles',
   'matchThemeWithLogo',
   'hideColors',
+  'finalExamWeight',
+  'finalExamClassicUi',
   'numberDisplay',
   'animationsEnabled',
   'bellSchedules',

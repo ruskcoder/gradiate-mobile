@@ -90,6 +90,10 @@ export interface User {
   showPageTitles?: boolean;
   matchThemeWithLogo?: boolean;
   hideColors?: boolean;
+  // Final exam weight (%) the Final Exam calculator remembers between visits.
+  finalExamWeight?: number;
+  // Show the original Final Exam calculator instead of the redesigned one.
+  finalExamClassicUi?: boolean;
   // Mobile-only (no web equivalent): play the staggered fade-up reveal when
   // grades render, and other list entrance animations.
   animationsEnabled?: boolean;
@@ -257,6 +261,8 @@ const DEFAULT_USER: User = {
   showPageTitles: true,
   matchThemeWithLogo: false,
   hideColors: false,
+  finalExamWeight: 15,
+  finalExamClassicUi: false,
   animationsEnabled: true,
   tabBarIndicatorEnabled: true,
   notificationsEnabled: true,
