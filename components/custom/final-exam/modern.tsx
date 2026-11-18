@@ -545,11 +545,11 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
               </View>
             )}
 
-            {/* Semester average, with A/B/C goal shortcuts (nothing to aim for when exempt) */}
+            {/* Semester average, with A/B/C goal shortcuts */}
             <View className="items-center gap-2">
               <View className="h-7 flex-row items-center gap-2">
                 <Text className="text-sm font-medium text-muted-foreground">Semester Average</Text>
-                {!exempt && LETTER_TARGETS.map((l) => {
+                {LETTER_TARGETS.map((l) => {
                   const raw = gradeAndColor(l.color, null, hideColors).bgColor;
                   const letterColor = raw.startsWith('var') ? primaryColor : raw;
                   const active = targetNum === l.target && auto !== 'target';
