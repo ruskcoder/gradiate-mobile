@@ -66,7 +66,8 @@ export function AssignmentDetailDialog({
   return (
     <AlertDialogContent>
       <AlertDialogHeader className="flex-row items-center gap-4 space-y-0">
-        <AlertDialogTitle className={cn('flex-1', score.excluded && 'line-through')} numberOfLines={1}>
+        {/* Long assignment names wrap onto more lines instead of cutting off with "…". */}
+        <AlertDialogTitle className={cn('flex-1', score.excluded && 'line-through')}>
           {score.name}
         </AlertDialogTitle>
         {score.percentage !== undefined && onEditPercentage && (

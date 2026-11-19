@@ -2,6 +2,7 @@ import { GradePillInput } from '@/components/custom/grade-pill-input';
 import { gradeAndColor } from '@/components/custom/grades-item';
 import { Icon } from '@/components/ui/icon';
 import { Switch } from '@/components/ui/switch';
+import { Toggle } from '@/components/ui/toggle';
 import { Text } from '@/components/ui/text';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAppSettings } from '@/lib/app-settings';
@@ -25,9 +26,10 @@ import { getInitialTerm, getLatestGradesLoad, getTermList, getTermTree } from '@
 import { useCurrentUser, useStore } from '@/lib/store';
 import { flatForest, pathToLabel, type TermNode } from '@/lib/term-tree';
 import { cn } from '@/lib/utils';
-import { ArrowRight, Calculator, RotateCcw } from 'lucide-react-native';
+import { ArrowRight, Calculator, Plus, RefreshCw, X } from 'lucide-react-native';
+import { CLASSES_ENDPOINT } from '@/lib/constants';
 import * as React from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ClassInfo {
@@ -180,6 +182,37 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
     );
   }, [semesters, semesterId, currentPath]);
 
+  // Load one term's grades. All-in-one portals return every term from a single
+  // request, so for them this reloads everything. `fresh` skips the cache.
+  const fetchTerm = React.useCallback(
+    async (term: string, fresh = false) => {
+      if (fresh) {
+        // Drop cached classes responses so the portal is actually asked again.
+        useStore.setState((state: any) => {
+          const cache: Record<string, any> = {};
+          for (const key of Object.keys(state.cache || {})) {
+            if (!key.includes(CLASSES_ENDPOINT)) cache[key] = state.cache[key];
+          }
+          return { cache };
+        });
+      }
+      setLoadingTerms((p) => ({ ...p, [term]: true }));
+      try {
+        for await (const chunk of getClasses(allInOne ? undefined : term)) {
+          if (!mountedRef.current) return;
+          if (chunk.success !== true) continue;
+          setByTerm((prev) => mergeClassAverages(prev, allInOne ? chunk.term : term, chunk.classes));
+          setLiveTerms((prev) => new Set(prev).add(term));
+        }
+      } catch (e) {
+        console.error(`Final exam calculator: failed to load term ${term}`, e);
+      } finally {
+        if (mountedRef.current) setLoadingTerms((p) => ({ ...p, [term]: false }));
+      }
+    },
+    [allInOne]
+  );
+
   // Quietly fetch the semester's other terms in the background. All-in-one
   // portals already sent every term, so there's nothing to fetch for them.
   // Not cancelled when deps change: each finished term updates `liveTerms`,
@@ -190,23 +223,9 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
     if (!todo.length) return;
     todo.forEach((t) => attemptedRef.current.add(t));
     (async () => {
-      for (const term of todo) {
-        setLoadingTerms((p) => ({ ...p, [term]: true }));
-        try {
-          for await (const chunk of getClasses(term)) {
-            if (!mountedRef.current) return;
-            if (chunk.success !== true) continue;
-            setByTerm((prev) => mergeClassAverages(prev, term, chunk.classes));
-            setLiveTerms((prev) => new Set(prev).add(term));
-          }
-        } catch (e) {
-          console.error(`Final exam calculator: failed to load term ${term}`, e);
-        } finally {
-          if (mountedRef.current) setLoadingTerms((p) => ({ ...p, [term]: false }));
-        }
-      }
+      for (const term of todo) await fetchTerm(term);
     })();
-  }, [initialLoading, allInOne, semester, liveTerms]);
+  }, [initialLoading, allInOne, semester, liveTerms, fetchTerm]);
 
   const ctxKey = `${course}|${semester.id}`;
   const overrides = overridesBy[ctxKey] ?? {};
@@ -324,25 +343,52 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
     if (field === 'target') setLastTouched('final');
   };
 
+  const iconButton = (label: string, onPress: () => void, icon: React.ReactNode, disabled = false) => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      hitSlop={6}
+      onPress={onPress}
+      className={cn('size-4 items-center justify-center', disabled && 'opacity-50')}>
+      {icon}
+    </Pressable>
+  );
+
+  // Refetch: drop any edit so the fresh grade shows, then reload the term.
+  const refetchTerm = (t: string) => {
+    setOverrides((p) => {
+      const rest = { ...p };
+      delete rest[t];
+      return rest;
+    });
+    fetchTerm(t, true);
+  };
+
+  // Turning a field's calculator off hands the job back to the semester
+  // average (or, if that was the one, to the final).
+  const stopCalculating = (field: string) => {
+    if (field !== 'target') calculateThis('target');
+    else if (!exempt) calculateThis('final');
+  };
+
   const calcButton = (field: string, active: boolean, small = false) => (
     <View
       pointerEvents="box-none"
       style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, marginLeft: small ? 4 : 8, justifyContent: 'center' }}>
-    <Pressable
-      accessibilityRole="button"
+    <Toggle
+      variant="outline"
+      size="sm"
       accessibilityLabel="Calculate This"
       hitSlop={8}
-      onPress={() => calculateThis(field)}
-      className={cn(
-        'items-center justify-center rounded-md border bg-background active:bg-accent',
-        small ? 'size-5' : 'size-8',
-        active ? 'border-primary' : 'border-border'
-      )}>
+      pressed={active}
+      onPressedChange={(on) => (on ? calculateThis(field) : stopCalculating(field))}
+      className={cn('min-w-0 p-0', small ? 'size-5 sm:size-5' : 'size-8 sm:size-8')}>
       <Icon
         as={Calculator}
         className={cn(small ? 'size-3' : 'size-4', active ? 'text-primary' : 'text-muted-foreground')}
       />
-    </Pressable>
+    </Toggle>
     </View>
   );
 
@@ -439,31 +485,37 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
               const idx = activeTerms.indexOf(t);
               const isAuto = !off && idx === auto;
               const value = isAuto && focused !== t ? fmt(result) : rawTerm(t);
-              const edited =
-                overrides[t] !== undefined && overrides[t] !== fetchedRaw(t) && fetchedRaw(t) !== '';
               return (
-                <View key={t} className={cn('items-center gap-1.5', off && 'opacity-40')}>
-                  <View className="h-5 flex-row items-center gap-1">
-                    <Pressable onPress={() => toggleTerm(t)} hitSlop={6}>
-                      <Text className={cn('text-xs font-medium text-muted-foreground', off && 'line-through')}>
-                        {termLabel(t)}
-                      </Text>
-                    </Pressable>
-                    {!off && calcButton(t, isAuto, true)}
-                    {edited && (
-                      <Pressable
-                        hitSlop={8}
-                        onPress={() =>
-                          setOverrides((p) => {
-                            const rest = { ...p };
-                            delete rest[t];
-                            return rest;
-                          })
-                        }>
-                        <Icon as={RotateCcw} className="size-3 text-muted-foreground" />
-                      </Pressable>
+                <View key={t} className="items-center gap-1.5">
+                  <View className="h-5 flex-row items-center gap-1.5">
+                    {iconButton(
+                      off ? 'Include this term' : 'Leave this term out',
+                      () => toggleTerm(t),
+                      <Icon as={off ? Plus : X} className="size-3.5 text-muted-foreground" />,
+                      !off && activeTerms.length <= 1
                     )}
+                    <Text
+                      className={cn(
+                        'text-xs font-medium',
+                        isAuto ? 'text-primary' : 'text-muted-foreground',
+                        off && 'line-through opacity-40'
+                      )}>
+                      {termLabel(t)}
+                    </Text>
+                    {semester.id !== MANUAL_SEMESTER.id &&
+                      iconButton(
+                        'Refetch this term',
+                        () => refetchTerm(t),
+                        loadingTerms[t] ? (
+                          <ActivityIndicator size="small" style={{ transform: [{ scale: 0.6 }] }} />
+                        ) : (
+                          <Icon as={RefreshCw} className="size-3 text-muted-foreground" />
+                        ),
+                        off || !!loadingTerms[t]
+                      )}
+                    {!off && calcButton(t, isAuto, true)}
                   </View>
+                  <View className={cn(off && 'opacity-40')}>
                   <GradePillInput
                     accessibilityLabel={termLabel(t)}
                     value={value}
@@ -476,6 +528,7 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
                     onBlur={() => setFocused(null)}
                     onChange={(v) => setOverrides((p) => ({ ...p, [t]: v }))}
                   />
+                  </View>
                 </View>
               );
             })}
@@ -506,7 +559,9 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
             {!exempt && (
               <View className="items-center gap-1.5">
                 <View className="h-5 flex-row items-center gap-1">
-                  <Text className="text-xs font-medium text-muted-foreground">Final</Text>
+                  <Text className={cn('text-xs font-medium', auto === 'final' ? 'text-primary' : 'text-muted-foreground')}>
+                    Final
+                  </Text>
                   <TextInput
                     accessibilityLabel="Final exam weight"
                     value={weightInput}
@@ -520,7 +575,6 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
                     )}
                   />
                   <Text className="text-xs font-medium text-muted-foreground">% weight</Text>
-                  {auto === 'final' && <Text className="text-xs font-medium text-primary">· calc</Text>}
                 </View>
                 <View>
                   <GradePillInput
@@ -548,21 +602,30 @@ export function FinalExamModern({ header }: { header: React.ReactNode }) {
             {/* Semester average, with A/B/C goal shortcuts */}
             <View className="items-center gap-2">
               <View className="h-7 flex-row items-center gap-2">
-                <Text className="text-sm font-medium text-muted-foreground">Semester Average</Text>
+                <Text className={cn('text-sm font-medium', auto === 'target' ? 'text-primary' : 'text-muted-foreground')}>
+                  Semester Average
+                </Text>
                 {LETTER_TARGETS.map((l) => {
                   const raw = gradeAndColor(l.color, null, hideColors).bgColor;
                   const letterColor = raw.startsWith('var') ? primaryColor : raw;
-                  const active = targetNum === l.target && auto !== 'target';
+                  // The semester average is the answer right now, so a goal
+                  // can't be typed into it.
+                  const locked = auto === 'target';
+                  const active = !locked && targetNum === l.target;
                   return (
                     <Pressable
                       key={l.letter}
+                      disabled={locked}
+                      accessibilityState={{ disabled: locked }}
+                      accessibilityHint={locked ? 'Cannot set a value that is being calculated' : undefined}
                       onPress={() => pickTarget(l.target)}
                       hitSlop={4}
                       className={cn(
-                        'size-7 items-center justify-center rounded-sm border-2'
+                        'size-7 items-center justify-center rounded-sm border-2',
+                        locked && 'opacity-50'
                       )}
                       style={{
-                        backgroundColor: letterColor,
+                        backgroundColor: locked ? '#9ca3af' : letterColor,
                         borderColor: active ? darken(letterColor) : 'transparent',
                       }}>
                       <Text className="text-sm font-bold text-white">{l.letter}</Text>
